@@ -1065,7 +1065,7 @@ public class XposedInit implements IXposedHookLoadPackage {
 
     private static void sanitizeDelegate(Object delegate, boolean isDark) {
         if (delegate == null) return;
-        int targetFg = isDark ? 0xFFFFFFFF : 0xFF000000;
+        int targetFg = isDark ? 0xFFF1F1F1 : 0xFF303030;
         String cName = delegate.getClass().getName();
 
         // 1. AutomatedIconDelegate: neutralize artificial plates/glow
@@ -1460,7 +1460,7 @@ public class XposedInit implements IXposedHookLoadPackage {
         }
 
         boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
-        int targetFg = isDark ? 0xFFFFFFFF : 0xFF000000;
+        int targetFg = isDark ? 0xFFF1F1F1 : 0xFF303030;
 
         // Ensure FastBitmapDrawable's main paint is NEVER muted or zeroed and has adaptive theme color
         try {
