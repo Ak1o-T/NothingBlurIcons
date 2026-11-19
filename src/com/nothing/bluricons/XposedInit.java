@@ -683,10 +683,12 @@ public class XposedInit implements IXposedHookLoadPackage {
                                 state.drawable.draw(canvas);
 
                                 if (inFolder) {
-                                    // Highlight icons inside folders with a soft milky glass overlay
-                                    // so they clearly separate from the folder's frosted glass backdrop.
+                                    // Highlight icons inside folders:
+                                    // In light mode: soft milky white overlay (lighter tone).
+                                    // In dark mode: soft dark smoked glass overlay (darker tone) so it matches
+                                    // dark style while staying distinct from the folder background.
                                     boolean isDark = (currentUiMode == Configuration.UI_MODE_NIGHT_YES);
-                                    int highlightColor = isDark ? 0x2AFFFFFF : 0x48FFFFFF;
+                                    int highlightColor = isDark ? 0x44000000 : 0x48FFFFFF;
                                     folderPlateHighlightPaint.setColor(highlightColor);
                                     canvas.drawRoundRect(0, 0, blurBounds.width(), blurBounds.height(), cornerRadius, cornerRadius, folderPlateHighlightPaint);
                                 }
