@@ -2,7 +2,7 @@
 
 [![Nothing OS](https://img.shields.io/badge/Nothing%20OS-5.0-black?style=for-the-badge&logo=android)](https://nothing.tech)
 [![LSPosed](https://img.shields.io/badge/LSPosed-Supported-5C6BC0?style=for-the-badge)](https://github.com/LSPosed/LSPosed)
-[![Refresh Rate](https://img.shields.io/badge/120%20FPS-Ultra%20Smooth-success?style=for-the-badge)]()
+[![GitHub Downloads](https://img.shields.io/github/downloads/Ak1o-T/NothingBlurIcons/total?style=for-the-badge)](https://github.com/Ak1o-T/NothingBlurIcons/releases/latest)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 
 An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **frosted glass wallpaper blur** to home screen and folder app icons — seamlessly matching Nothing OS 5.0 widgets, media player, and weather cards.
@@ -67,7 +67,7 @@ Requires any Nothing smartphone running **Nothing OS 5.0** (Android 15+):
 3. [**nothing-icongen**](https://github.com/linuxct/nothing-icongen) icon pack installed (set in *Settings -> Customization -> Icon Pack*).
 
 ### 2. Install Module
-1. Download the latest `NothingBlurIcons.apk` from [**Releases**](../../releases).
+1. Download the latest `NothingBlurIcons.apk` from [**Releases**](https://github.com/Ak1o-T/NothingBlurIcons/releases/latest).
 2. Install the APK on your device.
 3. Open your **LSPosed Manager**, go to **Modules**, and enable **NothingBlurIcons**.
 4. Ensure the scope has **Nothing Launcher** (`com.nothing.launcher`) checked.
@@ -145,7 +145,7 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 3. Установленный и применённый икон-пак [**nothing-icongen**](https://github.com/linuxct/nothing-icongen) (выбирается в *Настройки -> Персонализация -> Набор значков*).
 
 ### 2. Установка модуля
-1. Скачай актуальный файл `NothingBlurIcons.apk` со страницы [**Релизов**](../../releases).
+1. Скачай актуальный файл `NothingBlurIcons.apk` со страницы [**Релизов**](https://github.com/Ak1o-T/NothingBlurIcons/releases/latest).
 2. Установи APK на смартфон.
 3. Открой **LSPosed Manager**, перейди в раздел **Модули** и включи **NothingBlurIcons**.
 4. Убедись, что в списке приложений для модуля отмечена галочка напротив **Nothing Launcher** (`com.nothing.launcher`).
