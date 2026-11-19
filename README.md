@@ -26,16 +26,10 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 ## ✨ Features
 
 - 🪟 **Authentic Frosted Glass Blur:** Hooks directly into Nothing OS 5.0's proprietary `FrostedBackdropProvider` and `FrostedBackdropDrawable` — 100% identical in blur radius, lighting, and tint to official Nothing OS 5.0 widgets (Clock, Weather, Media Player).
-- 📁 **Smart Folder Separation:** Icons inside opened folders dynamically receive a soft milky-glass highlight (`0x48FFFFFF` in light mode / `0x2AFFFFFF` in dark mode) so that circular icon plates cleanly stand out from the folder's glass backdrop without blending in.
+- 📁 **Smart Folder Separation:** Icons inside opened folders dynamically receive an adaptive glass tone (soft milky-white highlight in Light Mode / smoked dark glass in Dark Mode) so that circular icon plates cleanly stand out from the folder's glass backdrop without blending in.
 - 🚀 **Buttery Smooth 120 FPS:** Zero lag or stutter. Highly optimized with frame-rate throttled invalidations (8ms budget), reflection lookup caching, and weak view-type caching. Measured jank rate under 2.0% on Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Classic Monochrome in All Apps & Search:** Automatically resolves and applies authentic Nothing OS monochrome themed icons in the app drawer and universal search bar with native charcoal/off-white plates.
 - 🔄 **Real-Time Wallpaper & Theme Sync:** Reacts instantaneously when switching between Dark/Light themes, paging home screen workspaces, or changing wallpapers.
-
-## 🆕 What's New in v1.1.0
-
-- 🌓 **Seamless Dynamic Theme Switching:** Switching between Dark Mode and Light Mode is now completely seamless in real time. Zero residual colors, zero stuck glyphs, and zero launcher restarts needed.
-- 🎨 **Adaptive Glyph Tinting:** Procedural and resource-based monochrome glyphs automatically adopt crisp white (`#FFFFFF`) in Dark Mode and crisp black (`#000000`) in Light Mode instantly.
-- 🧹 **Automatic In-Memory Plate Cleansing:** Removes all opaque artificial plates across all delegate hierarchies, leaving pure translucent frosted glass blur.
 
 ## 📸 Screenshots
 
@@ -110,16 +104,10 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 ## ✨ Возможности и особенности
 
 - 🪟 **Настоящее матовое стекло:** Подключается напрямую к фирменному движку Nothing OS 5.0 (`FrostedBackdropProvider` и `FrostedBackdropDrawable`) — радиус размытия, глубина и оттенок на 100% совпадают с системными виджетами Nothing OS 5.0 (Часы, Погода, Плеер).
-- 📁 **Умное отделение иконок в папках:** Внутри открытых папок круги иконок автоматически получают деликатную подсветку светлым матовым стеклом (`0x48FFFFFF` в светлой теме / `0x2AFFFFFF` в тёмной), благодаря чему они отчётливо видны и не сливаются с задним фоном самой папки.
+- 📁 **Умное отделение иконок в папках:** Внутри открытых папок круги иконок автоматически адаптируют оттенок (деликатное молочно-белое стекло в светлой теме / стильное тёмное дымчатое стекло в тёмной теме), благодаря чему они отчётливо видны и не сливаются с задним фоном самой папки.
 - 🚀 **Идеальные 120 FPS:** Никаких просадок и фризов. Полный аппаратный троттлинг перерисовок под 8 мс (120 Гц), кэширование рефлексии и отсутствие аллокаций памяти в цикле отрисовки. Уровень пропущенных кадров (jank rate) менее 2.0% на Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Классический монохром в меню приложений и поиске:** Автоматически подставляет оригинальные монохромные иконки Nothing на фирменных плашках в общем списке приложений и в поисковой строке.
 - 🔄 **Мгновенная синхронизация темы и обоев:** Реакция в реальном времени при смене светлой/тёмной темы, перелистывании рабочих столов и обновлении обоев.
-
-## 🆕 Что нового в v1.1.0
-
-- 🌓 **Бесшовное динамическое переключение тем:** Мгновенный переход между светлой и тёмной темами в реальном времени. Больше никаких «застрявших» цветов от предыдущей темы и никакой необходимости перезагружать лаунчер.
-- 🎨 **Адаптивная окраска глифов:** Монохромные иконки автоматически на лету окрашиваются в чистый белый цвет (`#FFFFFF`) в тёмной теме и в глубокий чёрный (`#000000`) в светлой теме.
-- 🧹 **Умная очистка искусственных плашек:** Все непрозрачные системные подложки делегатов автоматически обнуляются в памяти, открывая чистое матовое стекло.
 
 ## 📸 Скриншоты работы
 
