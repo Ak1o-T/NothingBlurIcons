@@ -1,7 +1,4 @@
-bin/classes/
-bin/dex/
-bin/*.apk
-!bin/NothingBlurIcons.apk
+bin/
 *.keystore
 .idea/
 *.iml

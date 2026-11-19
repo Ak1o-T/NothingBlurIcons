@@ -1,5 +1,6 @@
 package com.nothing.bluricons;
 
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -10,6 +11,8 @@ import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
@@ -61,6 +64,8 @@ public class XposedInit implements IXposedHookLoadPackage {
     private static long lastWallpaperCheckUptime = -1;
     private static float cachedWallpaperOffsetX = 0f;
     private static Bitmap cachedBlurredWallpaper = null;
+    private static volatile int lastSeenUiMode = -1;
+    private static volatile Object activeLauncherInstance = null;
 
     private static final int VIEW_TYPE_UNKNOWN = 0;
     private static final int VIEW_TYPE_ALL_APPS = 1;
@@ -88,7 +93,9 @@ public class XposedInit implements IXposedHookLoadPackage {
 
     private static final Map<View, BackdropState> backdropStates = new WeakHashMap<>();
     private static final Map<View, Rect> iconBoundsCache = new WeakHashMap<>();
-    private static final Map<Bitmap, Bitmap> cleanedBitmaps = new WeakHashMap<>();
+    private static final Map<Bitmap, Bitmap> rawBitmaps = new WeakHashMap<>();
+    private static final Map<Bitmap, Bitmap> cleanedBitmapsDark = new WeakHashMap<>();
+    private static final Map<Bitmap, Bitmap> cleanedBitmapsLight = new WeakHashMap<>();
     private static final Set<Object> processedDrawables = Collections.newSetFromMap(new WeakHashMap<>());
     private static final Map<View, float[]> cachedRestOffsets = new WeakHashMap<>();
 
@@ -157,20 +164,58 @@ public class XposedInit implements IXposedHookLoadPackage {
             });
         } catch (Throwable ignored) {}
 
-        // 1. Hook Launcher lifecycle to immediately refresh blur on app return / focus
+        // 1. Hook Launcher lifecycle & configuration change for instant seamless blur & theme sync
+        XC_MethodHook configChangedHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                activeLauncherInstance = param.thisObject;
+                if (param.args != null && param.args.length > 0 && param.args[0] instanceof Configuration) {
+                    Configuration newConfig = (Configuration) param.args[0];
+                    int newUiMode = newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK;
+                    handleThemeTransition(param.thisObject, newUiMode);
+                }
+            }
+        };
+
+        XC_MethodHook createHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                activeLauncherInstance = param.thisObject;
+                if (param.thisObject instanceof Context) {
+                    int currentUiMode = ((Context) param.thisObject).getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+                    lastSeenUiMode = currentUiMode;
+                }
+            }
+        };
+
+        XC_MethodHook resumeHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                activeLauncherInstance = param.thisObject;
+                if (param.thisObject instanceof Context) {
+                    int currentUiMode = ((Context) param.thisObject).getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+                    handleThemeTransition(param.thisObject, currentUiMode);
+                }
+                scheduleLauncherRefresh(param.thisObject);
+            }
+        };
+
+        try {
+            Class<?> ntLauncherClass = XposedHelpers.findClass("com.nothing.launcher.NTLauncher", lpparam.classLoader);
+            XposedBridge.hookAllMethods(ntLauncherClass, "onConfigurationChanged", configChangedHook);
+            XposedBridge.hookAllMethods(ntLauncherClass, "onCreate", createHook);
+            XposedBridge.hookAllMethods(ntLauncherClass, "onResume", resumeHook);
+        } catch (Throwable ignored) {}
+
         try {
             Class<?> launcherClass = XposedHelpers.findClass("com.android.launcher3.Launcher", lpparam.classLoader);
-            XC_MethodHook resumeHook = new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    scheduleLauncherRefresh(param.thisObject);
-                }
-            };
-
+            XposedBridge.hookAllMethods(launcherClass, "onConfigurationChanged", configChangedHook);
+            XposedBridge.hookAllMethods(launcherClass, "onCreate", createHook);
             XposedBridge.hookAllMethods(launcherClass, "onResume", resumeHook);
             XposedBridge.hookAllMethods(launcherClass, "onWindowFocusChanged", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    activeLauncherInstance = param.thisObject;
                     if (param.args != null && param.args.length > 0 && Boolean.TRUE.equals(param.args[0])) {
                         scheduleLauncherRefresh(param.thisObject);
                     }
@@ -407,7 +452,7 @@ public class XposedInit implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {}
         }
 
-        // 4. Hook FastBitmapDrawable.draw to clean the icon once in memory
+        // 4. Hook FastBitmapDrawable.draw and delegates to sanitize plates and enforce theme colors
         try {
             Class<?> fbdClass = XposedHelpers.findClass("com.android.launcher3.icons.FastBitmapDrawable", lpparam.classLoader);
             XC_MethodHook cleanHook = new XC_MethodHook() {
@@ -420,6 +465,30 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook FastBitmapDrawable: " + t.getMessage());
         }
+
+        try {
+            Class<?> tidClass = XposedHelpers.findClass("com.android.launcher3.icons.mono.ThemedIconDelegate", lpparam.classLoader);
+            XC_MethodHook tidDrawHook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+                    sanitizeDelegate(param.thisObject, isDark);
+                }
+            };
+            XposedBridge.hookAllMethods(tidClass, "drawContent", tidDrawHook);
+        } catch (Throwable ignored) {}
+
+        try {
+            Class<?> aidClass = XposedHelpers.findClass("com.android.launcher3.graphics.AutomatedIconDelegate", lpparam.classLoader);
+            XC_MethodHook aidDrawHook = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+                    sanitizeDelegate(param.thisObject, isDark);
+                }
+            };
+            XposedBridge.hookAllMethods(aidClass, "drawContent", aidDrawHook);
+        } catch (Throwable ignored) {}
 
         // 5. Hook TextView.onDraw for BubbleTextView:
         // Desktop / Hotseat: renders authentic Nothing OS FrostedBackdropDrawable (100% match with widgets & folders).
@@ -589,18 +658,26 @@ public class XposedInit implements IXposedHookLoadPackage {
                                 state.drawable.setCallback(null);
 
                                 int currentUiMode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-                                if (state.lastUiMode != currentUiMode) {
+                                if (lastSeenUiMode != -1 && currentUiMode != lastSeenUiMode) {
+                                    handleThemeTransition(context, currentUiMode);
+                                } else if (lastSeenUiMode == -1) {
+                                    lastSeenUiMode = currentUiMode;
+                                }
+
+                                boolean uiModeChanged = (state.lastUiMode != currentUiMode);
+                                if (uiModeChanged) {
                                     if (onThemeChangedMethod != null) {
                                         try {
                                             onThemeChangedMethod.invoke(state.drawable);
                                         } catch (Throwable ignored) {}
                                     }
                                     state.lastUiMode = currentUiMode;
+                                    state.forceUpdateOnNextDraw = true;
                                 }
 
                                 updateWallpaperCache(provider);
 
-                                boolean needsUpdate = state.forceUpdateOnNextDraw ||
+                                boolean needsUpdate = uiModeChanged || state.forceUpdateOnNextDraw ||
                                         (Math.abs(state.lastTargetX - targetX) > 0.1f) ||
                                         (Math.abs(state.lastTargetY - targetY) > 0.1f) ||
                                         (Math.abs(state.lastRadius - cornerRadius) > 0.1f) ||
@@ -963,14 +1040,86 @@ public class XposedInit implements IXposedHookLoadPackage {
         outLoc[1] = y;
     }
 
+    private static void sanitizeDelegate(Object delegate, boolean isDark) {
+        if (delegate == null) return;
+        int targetFg = isDark ? 0xFFFFFFFF : 0xFF000000;
+
+        // AutomatedIconDelegate fields: neutralize artificial plates/glow/stroke
+        try {
+            Paint pp = (Paint) XposedHelpers.getObjectField(delegate, "platePaint");
+            if (pp != null && pp.getAlpha() != 0) pp.setAlpha(0);
+        } catch (Throwable ignored) {}
+        try {
+            Paint gp = (Paint) XposedHelpers.getObjectField(delegate, "glowPaint");
+            if (gp != null && gp.getAlpha() != 0) gp.setAlpha(0);
+        } catch (Throwable ignored) {}
+        try {
+            Paint sp = (Paint) XposedHelpers.getObjectField(delegate, "strokePaint");
+            if (sp != null && sp.getAlpha() != 0) sp.setAlpha(0);
+        } catch (Throwable ignored) {}
+
+        try {
+            Object parent = XposedHelpers.getObjectField(delegate, "parentDelegate");
+            if (parent != null && parent != delegate) {
+                sanitizeDelegate(parent, isDark);
+            }
+        } catch (Throwable ignored) {}
+
+        // ThemedIconDelegate fields: neutralize plate and synchronize foreground color
+        try {
+            Paint p = (Paint) XposedHelpers.getObjectField(delegate, "paint");
+            if (p != null && p.getAlpha() != 0) p.setAlpha(0);
+        } catch (Throwable ignored) {}
+        try {
+            int currFg = XposedHelpers.getIntField(delegate, "colorFg");
+            if (currFg != targetFg) {
+                XposedHelpers.setIntField(delegate, "colorFg", targetFg);
+                Paint mp = (Paint) XposedHelpers.getObjectField(delegate, "monoPaint");
+                if (mp != null) {
+                    mp.setColorFilter(new PorterDuffColorFilter(targetFg, PorterDuff.Mode.SRC_IN));
+                    mp.setColor(targetFg);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private static void invalidateIconsInLayout(ViewGroup vg) {
         if (vg == null) return;
+        boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
         try {
             int count = vg.getChildCount();
             for (int i = 0; i < count; i++) {
                 View child = vg.getChildAt(i);
                 if (child != null) {
                     if (child.getClass().getName().contains("BubbleTextView")) {
+                        try {
+                            TextView tv = (TextView) child;
+                            Drawable[] cds = tv.getCompoundDrawables();
+                            if (cds != null && cds.length > 1 && cds[1] != null) {
+                                Drawable d = cds[1];
+                                Object delegate = null;
+                                try {
+                                    delegate = XposedHelpers.getObjectField(d, "delegate");
+                                } catch (Throwable ignored) {}
+                                sanitizeDelegate(d, isDark);
+                                if (delegate != null) {
+                                    sanitizeDelegate(delegate, isDark);
+                                }
+                                try {
+                                    Object info = XposedHelpers.getObjectField(d, "bitmapInfo");
+                                    if (info != null) {
+                                        Bitmap bmp = (Bitmap) XposedHelpers.getObjectField(info, "icon");
+                                        if (bmp != null && !bmp.isRecycled()) {
+                                            Bitmap cleaned = getCleanedBitmap(bmp, isDark);
+                                            if (cleaned != null && cleaned != bmp) {
+                                                XposedHelpers.setObjectField(info, "icon", cleaned);
+                                            }
+                                        }
+                                    }
+                                } catch (Throwable ignored) {}
+                                d.invalidateSelf();
+                            }
+                        } catch (Throwable ignored) {}
                         child.invalidate();
                     } else if (child instanceof ViewGroup) {
                         invalidateIconsInLayout((ViewGroup) child);
@@ -1035,32 +1184,168 @@ public class XposedInit implements IXposedHookLoadPackage {
     }
 
     private static void scheduleLauncherRefresh(final Object launcherObj) {
-        if (launcherObj == null) return;
+        Object target = (launcherObj != null) ? launcherObj : activeLauncherInstance;
+        if (target == null) return;
         try {
-            ViewGroup workspace = (ViewGroup) XposedHelpers.callMethod(launcherObj, "getWorkspace");
+            ViewGroup workspace = null;
+            ViewGroup hotseat = null;
+            if (target instanceof Activity) {
+                try {
+                    workspace = (ViewGroup) XposedHelpers.callMethod(target, "getWorkspace");
+                } catch (Throwable ignored) {}
+                try {
+                    hotseat = (ViewGroup) XposedHelpers.callMethod(target, "getHotseat");
+                } catch (Throwable ignored) {}
+            } else if (target instanceof View) {
+                View v = (View) target;
+                View root = v.getRootView();
+                if (root instanceof ViewGroup) {
+                    invalidateIconsInLayout((ViewGroup) root);
+                }
+            }
+
+            if (workspace == null && activeLauncherInstance != null && activeLauncherInstance != target) {
+                try {
+                    workspace = (ViewGroup) XposedHelpers.callMethod(activeLauncherInstance, "getWorkspace");
+                } catch (Throwable ignored) {}
+            }
+            if (hotseat == null && activeLauncherInstance != null && activeLauncherInstance != target) {
+                try {
+                    hotseat = (ViewGroup) XposedHelpers.callMethod(activeLauncherInstance, "getHotseat");
+                } catch (Throwable ignored) {}
+            }
+
             if (workspace != null) {
                 try {
                     XposedHelpers.callMethod(workspace, "syncFrostedBackdropOffsets");
                 } catch (Throwable ignored) {}
                 invalidateAllWorkspaceAndHotseatIcons(workspace);
-            } else {
-                try {
-                    ViewGroup hotseat = (ViewGroup) XposedHelpers.callMethod(launcherObj, "getHotseat");
-                    if (hotseat != null) {
-                        invalidateIconsInLayout(hotseat);
-                    }
-                } catch (Throwable ignored) {}
             }
+            if (hotseat != null) {
+                invalidateIconsInLayout(hotseat);
+            }
+
+            // Also check if a folder is currently open and refresh it
+            try {
+                ClassLoader cl = (target instanceof Context) ? ((Context) target).getClassLoader() : launcherClassLoader;
+                if (cl != null) {
+                    Class<?> folderClass = XposedHelpers.findClass("com.android.launcher3.folder.Folder", cl);
+                    Object targetActivity = (target instanceof Activity) ? target : activeLauncherInstance;
+                    if (targetActivity != null) {
+                        View openFolder = (View) XposedHelpers.callStaticMethod(folderClass, "getOpen", targetActivity);
+                        if (openFolder instanceof ViewGroup) {
+                            invalidateIconsInLayout((ViewGroup) openFolder);
+                            resetFolderIconBackdrops((ViewGroup) openFolder);
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
         } catch (Throwable t) {
             Log.e(TAG, "scheduleLauncherRefresh failed: " + t.getMessage());
         }
     }
 
-    private static Bitmap getCleanedBitmap(Bitmap icon) {
+    private static synchronized void handleThemeTransition(Object contextOrLauncher, int newUiMode) {
+        if (newUiMode != Configuration.UI_MODE_NIGHT_YES && newUiMode != Configuration.UI_MODE_NIGHT_NO) {
+            return;
+        }
+        if (lastSeenUiMode == newUiMode) {
+            return;
+        }
+        lastSeenUiMode = newUiMode;
+        boolean isDark = (newUiMode == Configuration.UI_MODE_NIGHT_YES);
+        Log.i(TAG, "Theme transition detected! Switching to " + (isDark ? "DARK" : "LIGHT") + " mode");
+
+        if (contextOrLauncher instanceof Activity) {
+            activeLauncherInstance = contextOrLauncher;
+        }
+
+        // 1. Purge internal caches
+        synchronized (cleanedBitmapsDark) {
+            cleanedBitmapsDark.clear();
+        }
+        synchronized (cleanedBitmapsLight) {
+            cleanedBitmapsLight.clear();
+        }
+        synchronized (processedDrawables) {
+            processedDrawables.clear();
+        }
+        synchronized (themedViews) {
+            themedViews.clear();
+        }
+        appIconsByComponent.clear();
+        appIconsByPackage.clear();
+        appIconsByTitle.clear();
+        synchronized (compositePlateCacheLight) {
+            compositePlateCacheLight.clear();
+        }
+        synchronized (compositePlateCacheDark) {
+            compositePlateCacheDark.clear();
+        }
+
+        // 2. Invalidate all frosted backdrop states
+        synchronized (backdropStates) {
+            for (BackdropState state : backdropStates.values()) {
+                if (state != null) {
+                    state.forceUpdateOnNextDraw = true;
+                    state.lastUiMode = -1;
+                    state.lastBitmap = null;
+                }
+            }
+        }
+
+        // 3. Clear Launcher's in-memory IconCache and reload LauncherModel
+        try {
+            Context ctx = null;
+            if (contextOrLauncher instanceof Context) {
+                ctx = (Context) contextOrLauncher;
+            } else if (activeLauncherInstance instanceof Context) {
+                ctx = (Context) activeLauncherInstance;
+            } else {
+                ctx = getApplicationContext();
+            }
+
+            ClassLoader cl = (ctx != null) ? ctx.getClassLoader() : launcherClassLoader;
+            if (cl != null) {
+                Class<?> launcherAppStateClass = XposedHelpers.findClass("com.android.launcher3.LauncherAppState", cl);
+                Object appState = XposedHelpers.callStaticMethod(launcherAppStateClass, "getInstance", ctx);
+                if (appState != null) {
+                    Object iconCache = XposedHelpers.callMethod(appState, "getIconCache");
+                    if (iconCache != null) {
+                        try {
+                            XposedHelpers.callMethod(iconCache, "clearMemoryCache");
+                        } catch (Throwable ignored) {}
+                        try {
+                            XposedHelpers.callMethod(iconCache, "updateIconParams", 0, 0);
+                        } catch (Throwable ignored) {}
+                    }
+                    try {
+                        Class<?> iconPoolClass = XposedHelpers.findClass("com.android.launcher3.icons.LauncherIcons$IconPool", cl);
+                        XposedHelpers.callStaticMethod(iconPoolClass, "clear");
+                    } catch (Throwable ignored) {}
+
+                    Object model = XposedHelpers.callMethod(appState, "getModel");
+                    if (model != null) {
+                        XposedHelpers.callMethod(model, "reloadIfActive");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to reload LauncherModel on theme transition: " + t.getMessage());
+        }
+
+        // 4. Immediately sanitize and invalidate on-screen icons in workspace, hotseat, and open folders
+        scheduleLauncherRefresh(contextOrLauncher);
+    }
+
+    private static Bitmap getCleanedBitmap(Bitmap icon, boolean isDark) {
         if (icon == null || icon.isRecycled()) return null;
-        synchronized (cleanedBitmaps) {
-            if (cleanedBitmaps.containsKey(icon)) {
-                return cleanedBitmaps.get(icon);
+
+        Map<Bitmap, Bitmap> cache = isDark ? cleanedBitmapsDark : cleanedBitmapsLight;
+        synchronized (cache) {
+            Bitmap cached = cache.get(icon);
+            if (cached != null && !cached.isRecycled()) {
+                return cached;
             }
         }
 
@@ -1069,88 +1354,145 @@ public class XposedInit implements IXposedHookLoadPackage {
             int h = icon.getHeight();
             if (w < 10 || h < 10) return icon;
 
-            // Safely convert to mutable ARGB_8888 in software memory
-            Bitmap swBitmap;
-            if (icon.getConfig() == Bitmap.Config.HARDWARE || !icon.isMutable()) {
-                swBitmap = icon.copy(Bitmap.Config.ARGB_8888, true);
-            } else {
-                swBitmap = icon;
+            // Retrieve original unmodified bitmap if already tracked
+            Bitmap sourceIcon = icon;
+            synchronized (rawBitmaps) {
+                Bitmap orig = rawBitmaps.get(icon);
+                if (orig != null && !orig.isRecycled()) {
+                    sourceIcon = orig;
+                    w = sourceIcon.getWidth();
+                    h = sourceIcon.getHeight();
+                } else {
+                    rawBitmaps.put(icon, icon);
+                }
             }
 
-            int[] pixels = new int[w * h];
-            swBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
+            int targetGlyphRgb = isDark ? 0x00FFFFFF : 0x00000000;
 
+            int[] pixels = new int[w * h];
+            sourceIcon.getPixels(pixels, 0, w, 0, 0, w, h);
+
+            // 1. Check for Nothing OS translucent backdrop disk
             boolean hasTranslucentDisk = false;
-            int sampleIdx = (h / 6) * w + (w / 2);
-            int sampleA = (pixels[sampleIdx] >>> 24);
-            if (sampleA > 0 && sampleA <= 150) {
+            int sampleIdx1 = (h / 6) * w + (w / 2);
+            int sampleA1 = (pixels[sampleIdx1] >>> 24);
+            int sampleIdx2 = (h / 2) * w + (w / 6);
+            int sampleA2 = (pixels[sampleIdx2] >>> 24);
+            int diskAlpha = 0;
+
+            if (sampleA1 > 0 && sampleA1 <= 160) {
                 hasTranslucentDisk = true;
-            } else {
-                int sampleIdx2 = (h / 2) * w + (w / 6);
-                int sampleA2 = (pixels[sampleIdx2] >>> 24);
-                if (sampleA2 > 0 && sampleA2 <= 150) {
-                    hasTranslucentDisk = true;
-                }
+                diskAlpha = sampleA1;
+            } else if (sampleA2 > 0 && sampleA2 <= 160) {
+                hasTranslucentDisk = true;
+                diskAlpha = sampleA2;
             }
 
             if (hasTranslucentDisk) {
-                if (swBitmap == icon) {
-                    swBitmap = icon.copy(Bitmap.Config.ARGB_8888, true);
-                    swBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
-                }
-
-                int maxDiskAlpha = Math.max(sampleA, 130);
+                Bitmap swBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                int maxDiskAlpha = Math.max(diskAlpha, 130);
                 for (int i = 0; i < pixels.length; i++) {
                     int a = (pixels[i] >>> 24);
                     if (a > 0 && a <= maxDiskAlpha + 5) {
                         pixels[i] = 0;
+                    } else if (a > maxDiskAlpha + 5) {
+                        pixels[i] = (a << 24) | targetGlyphRgb;
                     }
                 }
                 swBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
 
-                synchronized (cleanedBitmaps) {
-                    cleanedBitmaps.put(icon, swBitmap);
-                    cleanedBitmaps.put(swBitmap, swBitmap);
+                synchronized (cache) {
+                    cache.put(icon, swBitmap);
+                    cache.put(swBitmap, swBitmap);
+                }
+                synchronized (rawBitmaps) {
+                    rawBitmaps.put(swBitmap, sourceIcon);
                 }
                 return swBitmap;
             }
+
+            // 2. Check if this is an already disk-free monochrome icon needing theme recoloring
+            int pTopLeft = (pixels[(h / 8) * w + (w / 8)] >>> 24);
+            int pTopRight = (pixels[(h / 8) * w + (w * 7 / 8)] >>> 24);
+            int pBotLeft = (pixels[(h * 7 / 8) * w + (w / 8)] >>> 24);
+            int pBotRight = (pixels[(h * 7 / 8) * w + (w * 7 / 8)] >>> 24);
+
+            if (pTopLeft == 0 && pTopRight == 0 && pBotLeft == 0 && pBotRight == 0) {
+                boolean isMonochrome = true;
+                int nonZeroCount = 0;
+                int wrongColorCount = 0;
+
+                for (int i = 0; i < pixels.length; i += 7) {
+                    int p = pixels[i];
+                    int a = (p >>> 24);
+                    if (a > 30) {
+                        nonZeroCount++;
+                        int r = (p >> 16) & 0xFF;
+                        int g = (p >> 8) & 0xFF;
+                        int b = p & 0xFF;
+                        if (Math.abs(r - g) > 15 || Math.abs(g - b) > 15 || Math.abs(r - b) > 15) {
+                            isMonochrome = false;
+                            break;
+                        }
+                        int brightness = (r + g + b) / 3;
+                        if (isDark && brightness < 120) {
+                            wrongColorCount++;
+                        } else if (!isDark && brightness > 135) {
+                            wrongColorCount++;
+                        }
+                    }
+                }
+
+                if (isMonochrome && nonZeroCount > 10 && wrongColorCount > (nonZeroCount / 3)) {
+                    Bitmap swBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    for (int i = 0; i < pixels.length; i++) {
+                        int a = (pixels[i] >>> 24);
+                        if (a > 0) {
+                            pixels[i] = (a << 24) | targetGlyphRgb;
+                        }
+                    }
+                    swBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
+
+                    synchronized (cache) {
+                        cache.put(icon, swBitmap);
+                        cache.put(swBitmap, swBitmap);
+                    }
+                    synchronized (rawBitmaps) {
+                        rawBitmaps.put(swBitmap, sourceIcon);
+                    }
+                    return swBitmap;
+                }
+            }
         } catch (Throwable ignored) {}
 
-        synchronized (cleanedBitmaps) {
-            cleanedBitmaps.put(icon, icon);
+        synchronized (cache) {
+            cache.put(icon, icon);
         }
         return icon;
     }
 
     private static void cleanDrawableIcon(Object drawable) {
-        if (drawable == null || processedDrawables.contains(drawable)) return;
+        if (drawable == null) return;
+        boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+
+        // Always sanitize delegate
+        try {
+            Object delegate = XposedHelpers.getObjectField(drawable, "delegate");
+            if (delegate != null) {
+                sanitizeDelegate(delegate, isDark);
+            }
+        } catch (Throwable ignored) {}
+        sanitizeDelegate(drawable, isDark);
+
+        if (processedDrawables.contains(drawable)) return;
         processedDrawables.add(drawable);
 
         try {
-            // Check if delegate is AutomatedIconDelegate and disable artificial plate/glow
-            try {
-                Object delegate = XposedHelpers.getObjectField(drawable, "delegate");
-                if (delegate != null) {
-                    try {
-                        Paint platePaint = (Paint) XposedHelpers.getObjectField(delegate, "platePaint");
-                        if (platePaint != null && platePaint.getAlpha() != 0) {
-                            platePaint.setAlpha(0);
-                        }
-                    } catch (Throwable ignored) {}
-                    try {
-                        Paint glowPaint = (Paint) XposedHelpers.getObjectField(delegate, "glowPaint");
-                        if (glowPaint != null && glowPaint.getAlpha() != 0) {
-                            glowPaint.setAlpha(0);
-                        }
-                    } catch (Throwable ignored) {}
-                }
-            } catch (Throwable ignored) {}
-
             Object info = XposedHelpers.getObjectField(drawable, "bitmapInfo");
             if (info != null) {
                 Bitmap icon = (Bitmap) XposedHelpers.getObjectField(info, "icon");
                 if (icon != null && !icon.isRecycled()) {
-                    Bitmap cleaned = getCleanedBitmap(icon);
+                    Bitmap cleaned = getCleanedBitmap(icon, isDark);
                     if (cleaned != null && cleaned != icon) {
                         XposedHelpers.setObjectField(info, "icon", cleaned);
                     }
@@ -1278,7 +1620,8 @@ public class XposedInit implements IXposedHookLoadPackage {
                 } catch (Throwable ignored) {}
 
                 if (bmp != null && !bmp.isRecycled()) {
-                    Bitmap cleanBmp = getCleanedBitmap(bmp);
+                    boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+                    Bitmap cleanBmp = getCleanedBitmap(bmp, isDark);
                     if (cleanBmp == null) cleanBmp = bmp;
 
                     if (cn != null) {
@@ -1351,7 +1694,10 @@ public class XposedInit implements IXposedHookLoadPackage {
             float radius = (Math.min(w, h) / 2.0f) * 0.912f;
             c.drawCircle(cx, cy, radius, p);
 
-            c.drawBitmap(glyph, 0, 0, null);
+            Paint glyphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            int glyphColor = isDark ? 0xFFFFFFFF : 0xFF000000;
+            glyphPaint.setColorFilter(new PorterDuffColorFilter(glyphColor, PorterDuff.Mode.SRC_IN));
+            c.drawBitmap(glyph, 0, 0, glyphPaint);
 
             synchronized (cache) {
                 cache.put(glyph, composite);
@@ -1489,6 +1835,8 @@ public class XposedInit implements IXposedHookLoadPackage {
                                 Paint gp = (Paint) XposedHelpers.getObjectField(delegate, "glowPaint");
                                 if (gp != null && gp.getAlpha() != 0) gp.setAlpha(0);
                             } catch (Throwable ignored) {}
+                            boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+                            sanitizeDelegate(delegate, isDark);
                         }
                     } catch (Throwable ignored) {}
                 }

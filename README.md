@@ -31,6 +31,12 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 - 🔍 **Classic Monochrome in All Apps & Search:** Automatically resolves and applies authentic Nothing OS monochrome themed icons in the app drawer and universal search bar with native charcoal/off-white plates.
 - 🔄 **Real-Time Wallpaper & Theme Sync:** Reacts instantaneously when switching between Dark/Light themes, paging home screen workspaces, or changing wallpapers.
 
+## 🆕 What's New in v1.1.0
+
+- 🌓 **Seamless Dynamic Theme Switching:** Switching between Dark Mode and Light Mode is now completely seamless in real time. Zero residual colors, zero stuck glyphs, and zero launcher restarts needed.
+- 🎨 **Adaptive Glyph Tinting:** Procedural and resource-based monochrome glyphs automatically adopt crisp white (`#FFFFFF`) in Dark Mode and crisp black (`#000000`) in Light Mode instantly.
+- 🧹 **Automatic In-Memory Plate Cleansing:** Removes all opaque artificial plates across all delegate hierarchies, leaving pure translucent frosted glass blur.
+
 ## 📸 Screenshots
 
 ### ☀️ Light Mode vs 🌙 Dark Mode
@@ -108,6 +114,12 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 - 🚀 **Идеальные 120 FPS:** Никаких просадок и фризов. Полный аппаратный троттлинг перерисовок под 8 мс (120 Гц), кэширование рефлексии и отсутствие аллокаций памяти в цикле отрисовки. Уровень пропущенных кадров (jank rate) менее 2.0% на Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Классический монохром в меню приложений и поиске:** Автоматически подставляет оригинальные монохромные иконки Nothing на фирменных плашках в общем списке приложений и в поисковой строке.
 - 🔄 **Мгновенная синхронизация темы и обоев:** Реакция в реальном времени при смене светлой/тёмной темы, перелистывании рабочих столов и обновлении обоев.
+
+## 🆕 Что нового в v1.1.0
+
+- 🌓 **Бесшовное динамическое переключение тем:** Мгновенный переход между светлой и тёмной темами в реальном времени. Больше никаких «застрявших» цветов от предыдущей темы и никакой необходимости перезагружать лаунчер.
+- 🎨 **Адаптивная окраска глифов:** Монохромные иконки автоматически на лету окрашиваются в чистый белый цвет (`#FFFFFF`) в тёмной теме и в глубокий чёрный (`#000000`) в светлой теме.
+- 🧹 **Умная очистка искусственных плашек:** Все непрозрачные системные подложки делегатов автоматически обнуляются в памяти, открывая чистое матовое стекло.
 
 ## 📸 Скриншоты работы
 

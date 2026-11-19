@@ -12,6 +12,8 @@ public class XposedHelpers {
     public static Object callMethod(Object obj, String methodName, Object... args) { return null; }
     public static Object callStaticMethod(Class<?> clazz, String methodName, Object... args) { return null; }
     public static Object getObjectField(Object obj, String fieldName) { return null; }
+    public static int getIntField(Object obj, String fieldName) { return 0; }
+    public static void setIntField(Object obj, String fieldName, int value) { }
     public static Object getStaticObjectField(Class<?> clazz, String fieldName) { return null; }
     public static void setObjectField(Object obj, String fieldName, Object value) { }
     public static void setAdditionalInstanceField(Object obj, String key, Object value) { }

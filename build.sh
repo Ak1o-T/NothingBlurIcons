@@ -35,7 +35,11 @@ echo "[3/4] Packaging APK..."
 cd bin
 cp app-unsigned.apk unaligned.apk
 "$JAVA_BIN" -jar "$R8_JAR" 2>/dev/null || true
-jar uf unaligned.apk -C dex classes.dex
+if command -v jar >/dev/null 2>&1; then
+    jar uf unaligned.apk -C dex classes.dex
+else
+    (cd dex && zip -u ../unaligned.apk classes.dex)
+fi
 
 echo "[4/4] Aligning & Signing APK..."
 "$JAVA_BIN" -jar "$SIGNER_JAR" -a unaligned.apk --allowResign -o .
