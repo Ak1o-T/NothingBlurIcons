@@ -1,11 +1,11 @@
 # NothingBlurIcons 🪟✨
 
-[![Nothing OS](https://img.shields.io/badge/Nothing%20OS-3.0%20%7C%204.0%20%7C%205.0-black?style=for-the-badge&logo=android)](https://nothing.tech)
+[![Nothing OS](https://img.shields.io/badge/Nothing%20OS-5.0-black?style=for-the-badge&logo=android)](https://nothing.tech)
 [![LSPosed](https://img.shields.io/badge/LSPosed-Supported-5C6BC0?style=for-the-badge)](https://github.com/LSPosed/LSPosed)
 [![Refresh Rate](https://img.shields.io/badge/120%20FPS-Ultra%20Smooth-success?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 
-An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **frosted glass wallpaper blur** to home screen and folder app icons — seamlessly matching Nothing OS 5.0 / 3.0 widgets, media player, and weather cards.
+An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **frosted glass wallpaper blur** to home screen and folder app icons — seamlessly matching Nothing OS 5.0 widgets, media player, and weather cards.
 
 [English](#english) | [Русский](#русский)
 
@@ -25,7 +25,7 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 
 ## ✨ Features
 
-- 🪟 **Authentic Frosted Glass Blur:** Hooks directly into Nothing OS's proprietary `FrostedBackdropProvider` and `FrostedBackdropDrawable` — 100% identical in blur radius, lighting, and tint to official Nothing OS widgets (Clock, Weather, Media Player).
+- 🪟 **Authentic Frosted Glass Blur:** Hooks directly into Nothing OS 5.0's proprietary `FrostedBackdropProvider` and `FrostedBackdropDrawable` — 100% identical in blur radius, lighting, and tint to official Nothing OS 5.0 widgets (Clock, Weather, Media Player).
 - 📁 **Smart Folder Separation:** Icons inside opened folders dynamically receive a soft milky-glass highlight (`0x48FFFFFF` in light mode / `0x2AFFFFFF` in dark mode) so that circular icon plates cleanly stand out from the folder's glass backdrop without blending in.
 - 🚀 **Buttery Smooth 120 FPS:** Zero lag or stutter. Highly optimized with frame-rate throttled invalidations (8ms budget), reflection lookup caching, and weak view-type caching. Measured jank rate under 2.0% on Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Classic Monochrome in All Apps & Search:** Automatically resolves and applies authentic Nothing OS monochrome themed icons in the app drawer and universal search bar with native charcoal/off-white plates.
@@ -43,13 +43,11 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 
 ## 📱 Compatibility
 
-Requires any Nothing smartphone running **Nothing OS 3.0, 4.0 or 5.0** (Android 15+):
+Requires any Nothing smartphone running **Nothing OS 5.0** (Android 15+):
 
 - **Nothing Phone (3)** — Fully tested & verified ✅
-- **Nothing Phone (2a) & Phone (2a) Plus** — Fully supported ✅
-- **Nothing Phone (2)** — Supported on Nothing OS 3.x, 4.x and 5.0 ports ✅
-- **CMF Phone 1** — Supported with Nothing OS 3.0+ / 4.0 ✅
-- **Nothing Phone (1)** — Supported on Nothing OS 3.0 ✅
+- **Nothing Phone (2a) & Phone (2a) Plus** — Fully supported on Nothing OS 5.0 ✅
+- **Nothing Phone (2)** — Supported on Nothing OS 5.0 ports ✅
 
 ## 🛠️ Prerequisites & Installation
 
@@ -95,7 +93,7 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 
 ## ✨ Возможности и особенности
 
-- 🪟 **Настоящее матовое стекло:** Подключается напрямую к фирменному движку Nothing OS (`FrostedBackdropProvider` и `FrostedBackdropDrawable`) — радиус размытия, глубина и оттенок на 100% совпадают с системными виджетами Nothing (Часы, Погода, Плеер).
+- 🪟 **Настоящее матовое стекло:** Подключается напрямую к фирменному движку Nothing OS 5.0 (`FrostedBackdropProvider` и `FrostedBackdropDrawable`) — радиус размытия, глубина и оттенок на 100% совпадают с системными виджетами Nothing OS 5.0 (Часы, Погода, Плеер).
 - 📁 **Умное отделение иконок в папках:** Внутри открытых папок круги иконок автоматически получают деликатную подсветку светлым матовым стеклом (`0x48FFFFFF` в светлой теме / `0x2AFFFFFF` в тёмной), благодаря чему они отчётливо видны и не сливаются с задним фоном самой папки.
 - 🚀 **Идеальные 120 FPS:** Никаких просадок и фризов. Полный аппаратный троттлинг перерисовок под 8 мс (120 Гц), кэширование рефлексии и отсутствие аллокаций памяти в цикле отрисовки. Уровень пропущенных кадров (jank rate) менее 2.0% на Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Классический монохром в меню приложений и поиске:** Автоматически подставляет оригинальные монохромные иконки Nothing на фирменных плашках в общем списке приложений и в поисковой строке.
@@ -113,13 +111,11 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 
 ## 📱 Совместимость с устройствами
 
-Требуется любой смартфон Nothing с оболочкой **Nothing OS 3.0, 4.0 или 5.0** (Android 15+):
+Требуется смартфон Nothing с оболочкой **Nothing OS 5.0** (Android 15+):
 
 - **Nothing Phone (3)** — Протестировано и подтверждено ✅
-- **Nothing Phone (2a) и Phone (2a) Plus** — Полная поддержка ✅
-- **Nothing Phone (2)** — Поддерживается на Nothing OS 3.x, 4.x и портах 5.0 ✅
-- **CMF Phone 1** — Поддерживается на Nothing OS 3.0+ / 4.0 ✅
-- **Nothing Phone (1)** — Поддерживается на Nothing OS 3.0 ✅
+- **Nothing Phone (2a) и Phone (2a) Plus** — Полная поддержка на Nothing OS 5.0 ✅
+- **Nothing Phone (2)** — Поддерживается на портах Nothing OS 5.0 ✅
 
 ## 🛠️ Требования и установка
 
