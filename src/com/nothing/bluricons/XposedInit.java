@@ -466,30 +466,6 @@ public class XposedInit implements IXposedHookLoadPackage {
             Log.e(TAG, "Failed to hook FastBitmapDrawable: " + t.getMessage());
         }
 
-        try {
-            Class<?> tidClass = XposedHelpers.findClass("com.android.launcher3.icons.mono.ThemedIconDelegate", lpparam.classLoader);
-            XC_MethodHook tidDrawHook = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
-                    sanitizeDelegate(param.thisObject, isDark);
-                }
-            };
-            XposedBridge.hookAllMethods(tidClass, "drawContent", tidDrawHook);
-        } catch (Throwable ignored) {}
-
-        try {
-            Class<?> aidClass = XposedHelpers.findClass("com.android.launcher3.graphics.AutomatedIconDelegate", lpparam.classLoader);
-            XC_MethodHook aidDrawHook = new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
-                    sanitizeDelegate(param.thisObject, isDark);
-                }
-            };
-            XposedBridge.hookAllMethods(aidClass, "drawContent", aidDrawHook);
-        } catch (Throwable ignored) {}
-
         // 5. Hook TextView.onDraw for BubbleTextView:
         // Desktop / Hotseat: renders authentic Nothing OS FrostedBackdropDrawable (100% match with widgets & folders).
         // Folders: renders ultra-fast hardware-accelerated Skia with authentic ColorFilter (120 FPS dynamic glass).
@@ -1110,7 +1086,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                                     if (info != null) {
                                         Bitmap bmp = (Bitmap) XposedHelpers.getObjectField(info, "icon");
                                         if (bmp != null && !bmp.isRecycled()) {
-                                            Bitmap cleaned = getCleanedBitmap(bmp, isDark);
+                                            Bitmap cleaned = getCleanedBitmap(bmp);
                                             if (cleaned != null && cleaned != bmp) {
                                                 XposedHelpers.setObjectField(info, "icon", cleaned);
                                             }
@@ -1338,12 +1314,11 @@ public class XposedInit implements IXposedHookLoadPackage {
         scheduleLauncherRefresh(contextOrLauncher);
     }
 
-    private static Bitmap getCleanedBitmap(Bitmap icon, boolean isDark) {
+    private static Bitmap getCleanedBitmap(Bitmap icon) {
         if (icon == null || icon.isRecycled()) return null;
 
-        Map<Bitmap, Bitmap> cache = isDark ? cleanedBitmapsDark : cleanedBitmapsLight;
-        synchronized (cache) {
-            Bitmap cached = cache.get(icon);
+        synchronized (cleanedBitmapsDark) {
+            Bitmap cached = cleanedBitmapsDark.get(icon);
             if (cached != null && !cached.isRecycled()) {
                 return cached;
             }
@@ -1354,25 +1329,16 @@ public class XposedInit implements IXposedHookLoadPackage {
             int h = icon.getHeight();
             if (w < 10 || h < 10) return icon;
 
-            // Retrieve original unmodified bitmap if already tracked
-            Bitmap sourceIcon = icon;
-            synchronized (rawBitmaps) {
-                Bitmap orig = rawBitmaps.get(icon);
-                if (orig != null && !orig.isRecycled()) {
-                    sourceIcon = orig;
-                    w = sourceIcon.getWidth();
-                    h = sourceIcon.getHeight();
-                } else {
-                    rawBitmaps.put(icon, icon);
-                }
+            Bitmap swBitmap;
+            if (icon.getConfig() == Bitmap.Config.HARDWARE || !icon.isMutable()) {
+                swBitmap = icon.copy(Bitmap.Config.ARGB_8888, true);
+            } else {
+                swBitmap = icon;
             }
 
-            int targetGlyphRgb = isDark ? 0x00FFFFFF : 0x00000000;
-
             int[] pixels = new int[w * h];
-            sourceIcon.getPixels(pixels, 0, w, 0, 0, w, h);
+            swBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
 
-            // 1. Check for Nothing OS translucent backdrop disk
             boolean hasTranslucentDisk = false;
             int sampleIdx1 = (h / 6) * w + (w / 2);
             int sampleA1 = (pixels[sampleIdx1] >>> 24);
@@ -1389,93 +1355,51 @@ public class XposedInit implements IXposedHookLoadPackage {
             }
 
             if (hasTranslucentDisk) {
-                Bitmap swBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                if (swBitmap == icon) {
+                    swBitmap = icon.copy(Bitmap.Config.ARGB_8888, true);
+                    swBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
+                }
+
                 int maxDiskAlpha = Math.max(diskAlpha, 130);
                 for (int i = 0; i < pixels.length; i++) {
                     int a = (pixels[i] >>> 24);
                     if (a > 0 && a <= maxDiskAlpha + 5) {
                         pixels[i] = 0;
-                    } else if (a > maxDiskAlpha + 5) {
-                        pixels[i] = (a << 24) | targetGlyphRgb;
                     }
                 }
                 swBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
 
-                synchronized (cache) {
-                    cache.put(icon, swBitmap);
-                    cache.put(swBitmap, swBitmap);
-                }
-                synchronized (rawBitmaps) {
-                    rawBitmaps.put(swBitmap, sourceIcon);
+                synchronized (cleanedBitmapsDark) {
+                    cleanedBitmapsDark.put(icon, swBitmap);
+                    cleanedBitmapsDark.put(swBitmap, swBitmap);
                 }
                 return swBitmap;
             }
-
-            // 2. Check if this is an already disk-free monochrome icon needing theme recoloring
-            int pTopLeft = (pixels[(h / 8) * w + (w / 8)] >>> 24);
-            int pTopRight = (pixels[(h / 8) * w + (w * 7 / 8)] >>> 24);
-            int pBotLeft = (pixels[(h * 7 / 8) * w + (w / 8)] >>> 24);
-            int pBotRight = (pixels[(h * 7 / 8) * w + (w * 7 / 8)] >>> 24);
-
-            if (pTopLeft == 0 && pTopRight == 0 && pBotLeft == 0 && pBotRight == 0) {
-                boolean isMonochrome = true;
-                int nonZeroCount = 0;
-                int wrongColorCount = 0;
-
-                for (int i = 0; i < pixels.length; i += 7) {
-                    int p = pixels[i];
-                    int a = (p >>> 24);
-                    if (a > 30) {
-                        nonZeroCount++;
-                        int r = (p >> 16) & 0xFF;
-                        int g = (p >> 8) & 0xFF;
-                        int b = p & 0xFF;
-                        if (Math.abs(r - g) > 15 || Math.abs(g - b) > 15 || Math.abs(r - b) > 15) {
-                            isMonochrome = false;
-                            break;
-                        }
-                        int brightness = (r + g + b) / 3;
-                        if (isDark && brightness < 120) {
-                            wrongColorCount++;
-                        } else if (!isDark && brightness > 135) {
-                            wrongColorCount++;
-                        }
-                    }
-                }
-
-                if (isMonochrome && nonZeroCount > 10 && wrongColorCount > (nonZeroCount / 3)) {
-                    Bitmap swBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-                    for (int i = 0; i < pixels.length; i++) {
-                        int a = (pixels[i] >>> 24);
-                        if (a > 0) {
-                            pixels[i] = (a << 24) | targetGlyphRgb;
-                        }
-                    }
-                    swBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
-
-                    synchronized (cache) {
-                        cache.put(icon, swBitmap);
-                        cache.put(swBitmap, swBitmap);
-                    }
-                    synchronized (rawBitmaps) {
-                        rawBitmaps.put(swBitmap, sourceIcon);
-                    }
-                    return swBitmap;
-                }
-            }
         } catch (Throwable ignored) {}
 
-        synchronized (cache) {
-            cache.put(icon, icon);
+        synchronized (cleanedBitmapsDark) {
+            cleanedBitmapsDark.put(icon, icon);
         }
         return icon;
     }
 
     private static void cleanDrawableIcon(Object drawable) {
         if (drawable == null) return;
+        try {
+            if (drawable instanceof Drawable) {
+                Drawable.Callback cb = ((Drawable) drawable).getCallback();
+                if (cb instanceof View) {
+                    int viewType = getViewType((View) cb);
+                    if (viewType == VIEW_TYPE_ALL_APPS) {
+                        return; // Do NOT strip plates or alter delegates in the App Drawer!
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
         boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
 
-        // Always sanitize delegate
+        // Always sanitize delegate for desktop / folder icons
         try {
             Object delegate = XposedHelpers.getObjectField(drawable, "delegate");
             if (delegate != null) {
@@ -1492,7 +1416,7 @@ public class XposedInit implements IXposedHookLoadPackage {
             if (info != null) {
                 Bitmap icon = (Bitmap) XposedHelpers.getObjectField(info, "icon");
                 if (icon != null && !icon.isRecycled()) {
-                    Bitmap cleaned = getCleanedBitmap(icon, isDark);
+                    Bitmap cleaned = getCleanedBitmap(icon);
                     if (cleaned != null && cleaned != icon) {
                         XposedHelpers.setObjectField(info, "icon", cleaned);
                     }
@@ -1620,8 +1544,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                 } catch (Throwable ignored) {}
 
                 if (bmp != null && !bmp.isRecycled()) {
-                    boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
-                    Bitmap cleanBmp = getCleanedBitmap(bmp, isDark);
+                    Bitmap cleanBmp = getCleanedBitmap(bmp);
                     if (cleanBmp == null) cleanBmp = bmp;
 
                     if (cn != null) {
@@ -1694,10 +1617,7 @@ public class XposedInit implements IXposedHookLoadPackage {
             float radius = (Math.min(w, h) / 2.0f) * 0.912f;
             c.drawCircle(cx, cy, radius, p);
 
-            Paint glyphPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            int glyphColor = isDark ? 0xFFFFFFFF : 0xFF000000;
-            glyphPaint.setColorFilter(new PorterDuffColorFilter(glyphColor, PorterDuff.Mode.SRC_IN));
-            c.drawBitmap(glyph, 0, 0, glyphPaint);
+            c.drawBitmap(glyph, 0, 0, null);
 
             synchronized (cache) {
                 cache.put(glyph, composite);
@@ -1835,8 +1755,6 @@ public class XposedInit implements IXposedHookLoadPackage {
                                 Paint gp = (Paint) XposedHelpers.getObjectField(delegate, "glowPaint");
                                 if (gp != null && gp.getAlpha() != 0) gp.setAlpha(0);
                             } catch (Throwable ignored) {}
-                            boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
-                            sanitizeDelegate(delegate, isDark);
                         }
                     } catch (Throwable ignored) {}
                 }
