@@ -33,13 +33,23 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 
 ## 📸 Screenshots
 
-| Home Screen Blur | Folder Glass Separation |
-|:---:|:---:|
-| <img src="docs/screenshots/home_overview.png" width="340"/> | <img src="docs/screenshots/folder_open.png" width="340"/> |
+### ☀️ Light Mode vs 🌙 Dark Mode
 
-| Folder Icons Close-up | Drawer Search Integration |
+| Light Mode (Home Screen) | Dark Mode (Home Screen) |
 |:---:|:---:|
-| <img src="docs/screenshots/folder_crop.png" width="340"/> | <img src="docs/screenshots/drawer_search.png" width="340"/> |
+| <img src="docs/screenshots/home_overview.png" width="340"/> | <img src="docs/screenshots/home_dark.png" width="340"/> |
+
+| Light Mode ("Launchers" Folder) | Dark Mode ("Launchers" Folder) |
+|:---:|:---:|
+| <img src="docs/screenshots/folder_open.png" width="340"/> | <img src="docs/screenshots/folder_dark.png" width="340"/> |
+
+| Light Mode (Folder Close-up) | Dark Mode (Folder Close-up) |
+|:---:|:---:|
+| <img src="docs/screenshots/folder_crop.png" width="340"/> | <img src="docs/screenshots/folder_crop_dark.png" width="340"/> |
+
+| Light Mode (App Drawer Search) | Dark Mode (App Drawer Search) |
+|:---:|:---:|
+| <img src="docs/screenshots/drawer_search.png" width="340"/> | <img src="docs/screenshots/drawer_search_dark.png" width="340"/> |
 
 ## 📱 Compatibility
 
@@ -101,13 +111,23 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 
 ## 📸 Скриншоты работы
 
-| Размытие на рабочем столе | Светлое стекло в папках |
-|:---:|:---:|
-| <img src="docs/screenshots/home_overview.png" width="340"/> | <img src="docs/screenshots/folder_open.png" width="340"/> |
+### ☀️ Светлая тема vs 🌙 Тёмная тема
 
-| Крупный план иконок папки | Поиск в меню приложений |
+| Светлая тема (Рабочий стол) | Тёмная тема (Рабочий стол) |
 |:---:|:---:|
-| <img src="docs/screenshots/folder_crop.png" width="340"/> | <img src="docs/screenshots/drawer_search.png" width="340"/> |
+| <img src="docs/screenshots/home_overview.png" width="340"/> | <img src="docs/screenshots/home_dark.png" width="340"/> |
+
+| Светлая тема (Папка "Launchers") | Тёмная тема (Папка "Launchers") |
+|:---:|:---:|
+| <img src="docs/screenshots/folder_open.png" width="340"/> | <img src="docs/screenshots/folder_dark.png" width="340"/> |
+
+| Светлая тема (Крупный план в папке) | Тёмная тема (Крупный план в папке) |
+|:---:|:---:|
+| <img src="docs/screenshots/folder_crop.png" width="340"/> | <img src="docs/screenshots/folder_crop_dark.png" width="340"/> |
+
+| Светлая тема (Поиск в меню) | Тёмная тема (Поиск в меню) |
+|:---:|:---:|
+| <img src="docs/screenshots/drawer_search.png" width="340"/> | <img src="docs/screenshots/drawer_search_dark.png" width="340"/> |
 
 ## 📱 Совместимость с устройствами
 
