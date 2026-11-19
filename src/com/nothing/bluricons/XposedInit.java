@@ -1019,44 +1019,45 @@ public class XposedInit implements IXposedHookLoadPackage {
     private static void sanitizeDelegate(Object delegate, boolean isDark) {
         if (delegate == null) return;
         int targetFg = isDark ? 0xFFFFFFFF : 0xFF000000;
+        String cName = delegate.getClass().getName();
 
-        // AutomatedIconDelegate fields: neutralize artificial plates/glow/stroke
-        try {
-            Paint pp = (Paint) XposedHelpers.getObjectField(delegate, "platePaint");
-            if (pp != null && pp.getAlpha() != 0) pp.setAlpha(0);
-        } catch (Throwable ignored) {}
-        try {
-            Paint gp = (Paint) XposedHelpers.getObjectField(delegate, "glowPaint");
-            if (gp != null && gp.getAlpha() != 0) gp.setAlpha(0);
-        } catch (Throwable ignored) {}
-        try {
-            Paint sp = (Paint) XposedHelpers.getObjectField(delegate, "strokePaint");
-            if (sp != null && sp.getAlpha() != 0) sp.setAlpha(0);
-        } catch (Throwable ignored) {}
+        // 1. AutomatedIconDelegate: neutralize artificial plates/glow
+        if (cName.contains("AutomatedIconDelegate")) {
+            try {
+                Paint pp = (Paint) XposedHelpers.getObjectField(delegate, "platePaint");
+                if (pp != null && pp.getAlpha() != 0) pp.setAlpha(0);
+            } catch (Throwable ignored) {}
+            try {
+                Paint gp = (Paint) XposedHelpers.getObjectField(delegate, "glowPaint");
+                if (gp != null && gp.getAlpha() != 0) gp.setAlpha(0);
+            } catch (Throwable ignored) {}
 
-        try {
-            Object parent = XposedHelpers.getObjectField(delegate, "parentDelegate");
-            if (parent != null && parent != delegate) {
-                sanitizeDelegate(parent, isDark);
-            }
-        } catch (Throwable ignored) {}
-
-        // ThemedIconDelegate fields: neutralize plate and synchronize foreground color
-        try {
-            Paint p = (Paint) XposedHelpers.getObjectField(delegate, "paint");
-            if (p != null && p.getAlpha() != 0) p.setAlpha(0);
-        } catch (Throwable ignored) {}
-        try {
-            int currFg = XposedHelpers.getIntField(delegate, "colorFg");
-            if (currFg != targetFg) {
-                XposedHelpers.setIntField(delegate, "colorFg", targetFg);
-                Paint mp = (Paint) XposedHelpers.getObjectField(delegate, "monoPaint");
-                if (mp != null) {
-                    mp.setColorFilter(new PorterDuffColorFilter(targetFg, PorterDuff.Mode.SRC_IN));
-                    mp.setColor(targetFg);
+            try {
+                Object parent = XposedHelpers.getObjectField(delegate, "parentDelegate");
+                if (parent != null && parent != delegate) {
+                    sanitizeDelegate(parent, isDark);
                 }
-            }
-        } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+        }
+
+        // 2. ThemedIconDelegate: neutralize plate and synchronize foreground color
+        if (cName.contains("ThemedIconDelegate")) {
+            try {
+                Paint p = (Paint) XposedHelpers.getObjectField(delegate, "paint");
+                if (p != null && p.getAlpha() != 0) p.setAlpha(0);
+            } catch (Throwable ignored) {}
+            try {
+                int currFg = XposedHelpers.getIntField(delegate, "colorFg");
+                if (currFg != targetFg) {
+                    XposedHelpers.setIntField(delegate, "colorFg", targetFg);
+                    Paint mp = (Paint) XposedHelpers.getObjectField(delegate, "monoPaint");
+                    if (mp != null) {
+                        mp.setColorFilter(new PorterDuffColorFilter(targetFg, PorterDuff.Mode.SRC_IN));
+                        mp.setColor(targetFg);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
     }
 
     private static void invalidateIconsInLayout(ViewGroup vg) {
@@ -1073,11 +1074,14 @@ public class XposedInit implements IXposedHookLoadPackage {
                             Drawable[] cds = tv.getCompoundDrawables();
                             if (cds != null && cds.length > 1 && cds[1] != null) {
                                 Drawable d = cds[1];
+                                try {
+                                    Paint p = (Paint) XposedHelpers.getObjectField(d, "paint");
+                                    if (p != null && p.getAlpha() == 0) p.setAlpha(255);
+                                } catch (Throwable ignored) {}
                                 Object delegate = null;
                                 try {
                                     delegate = XposedHelpers.getObjectField(d, "delegate");
                                 } catch (Throwable ignored) {}
-                                sanitizeDelegate(d, isDark);
                                 if (delegate != null) {
                                     sanitizeDelegate(delegate, isDark);
                                 }
@@ -1398,15 +1402,26 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable ignored) {}
 
         boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+        int targetFg = isDark ? 0xFFFFFFFF : 0xFF000000;
 
-        // Always sanitize delegate for desktop / folder icons
+        // Ensure FastBitmapDrawable's main paint is NEVER muted or zeroed and has adaptive theme color
+        try {
+            Paint p = (Paint) XposedHelpers.getObjectField(drawable, "paint");
+            if (p != null) {
+                if (p.getAlpha() == 0) {
+                    p.setAlpha(255);
+                }
+                p.setColorFilter(new PorterDuffColorFilter(targetFg, PorterDuff.Mode.SRC_IN));
+            }
+        } catch (Throwable ignored) {}
+
+        // Sanitize inner delegate for desktop / folder icons
         try {
             Object delegate = XposedHelpers.getObjectField(drawable, "delegate");
             if (delegate != null) {
                 sanitizeDelegate(delegate, isDark);
             }
         } catch (Throwable ignored) {}
-        sanitizeDelegate(drawable, isDark);
 
         if (processedDrawables.contains(drawable)) return;
         processedDrawables.add(drawable);
