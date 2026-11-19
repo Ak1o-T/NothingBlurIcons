@@ -53,11 +53,11 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 
 ## 📱 Compatibility
 
-Requires any Nothing smartphone running **Nothing OS 5.0** (Android 15+):
+Requires a Nothing smartphone running **Nothing OS 5.0** (Android 17):
 
-- **Nothing Phone (3)** — Fully tested & verified ✅
-- **Nothing Phone (2a) & Phone (2a) Plus** — Fully supported on Nothing OS 5.0 ✅
-- **Nothing Phone (2)** — Supported on Nothing OS 5.0 ports ✅
+- **Nothing Phone (3)** — tested and confirmed ✅
+
+**Note**: I don't own any other Nothing devices besides the Phone (3), so I cannot guarantee proper functionality on other models running the stable Nothing OS 5.0 release. Install at your own risk.
 
 ## 🛠️ Prerequisites & Installation
 
@@ -131,11 +131,11 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 
 ## 📱 Совместимость с устройствами
 
-Требуется смартфон Nothing с оболочкой **Nothing OS 5.0** (Android 15+):
+Требуется смартфон Nothing с оболочкой **Nothing OS 5.0 (Android 17)**:
 
-- **Nothing Phone (3)** — Протестировано и подтверждено ✅
-- **Nothing Phone (2a) и Phone (2a) Plus** — Полная поддержка на Nothing OS 5.0 ✅
-- **Nothing Phone (2)** — Поддерживается на портах Nothing OS 5.0 ✅
+- **Nothing Phone (3)** — протестировано и подтверждено ✅
+
+**Примечание**: У меня нет других моделей Nothing, кроме Phone (3), поэтому я не могу гарантировать корректную работу на остальных устройствах с релизной Nothing OS 5.0. Устанавливайте на свой страх и риск.
 
 ## 🛠️ Требования и установка
 
