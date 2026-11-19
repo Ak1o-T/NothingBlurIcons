@@ -29,7 +29,7 @@ else
     AAPT2_CMD="$AAPT2_BIN"
 fi
 
-"$AAPT2_CMD" compile res/values/strings.xml res/values/arrays.xml -o bin/compiled_res/
+"$AAPT2_CMD" compile --dir res -o bin/compiled_res/
 "$AAPT2_CMD" link -I "$ANDROID_JAR" --manifest AndroidManifest.xml bin/compiled_res/*.flat -o bin/app-base.apk
 
 echo "[2/5] Compiling Java sources..."
