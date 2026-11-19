@@ -71,6 +71,7 @@ public class XposedInit implements IXposedHookLoadPackage {
     private static final int VIEW_TYPE_ALL_APPS = 1;
     private static final int VIEW_TYPE_FOLDER = 2;
     private static final int VIEW_TYPE_WORKSPACE = 3;
+    private static final int VIEW_TYPE_WIDGET = 4;
     private static final Map<View, Integer> viewTypeCache = new WeakHashMap<>();
     private static final Set<View> themedViews = Collections.newSetFromMap(new WeakHashMap<>());
 
@@ -563,6 +564,11 @@ public class XposedInit implements IXposedHookLoadPackage {
                             return;
                         }
 
+                        // If not Workspace or Folder (e.g. inside a widget sheet or popup), DO NOT DRAW BACKDROP!
+                        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER) {
+                            return;
+                        }
+
                         Object provider = getFrostedProvider(context, view.getClass().getClassLoader());
                         if (provider == null) {
                             return;
@@ -921,11 +927,46 @@ public class XposedInit implements IXposedHookLoadPackage {
     }
 
     private static int computeViewType(View view) {
+        if (view == null) return VIEW_TYPE_UNKNOWN;
+
+        // Check view itself
+        String selfName = view.getClass().getName().toLowerCase();
+        if (selfName.contains("widgetpicker") || selfName.contains("widgetslist") ||
+            selfName.contains("widgetfullsheet") || selfName.contains("widgetbottomsheet") ||
+            selfName.contains("widgetcell") || selfName.contains("preview_container") ||
+            selfName.contains("widget_picker_detail") || selfName.contains("widget_preview_page")) {
+            return VIEW_TYPE_WIDGET;
+        }
+
         ViewParent p = view.getParent();
         while (p instanceof View) {
             View pv = (View) p;
             String name = pv.getClass().getName();
             String nameLower = name.toLowerCase();
+
+            // 1. Check for Widgets Picker / Sheet / Details
+            if (nameLower.contains("widgetpicker") || nameLower.contains("widgetslist") ||
+                nameLower.contains("widgetfullsheet") || nameLower.contains("widgetbottomsheet") ||
+                nameLower.contains("widgetcell") || nameLower.contains("preview_container") ||
+                nameLower.contains("widget_picker_detail") || nameLower.contains("widget_preview_page")) {
+                return VIEW_TYPE_WIDGET;
+            }
+            try {
+                int id = pv.getId();
+                if (id != View.NO_ID && pv.getResources() != null) {
+                    String resName = pv.getResources().getResourceEntryName(id);
+                    if (resName != null) {
+                        String resLower = resName.toLowerCase();
+                        if (resLower.contains("widget_picker") || resLower.contains("widget_preview") ||
+                            resLower.contains("widget_cell") || resLower.contains("widgets_full_sheet") ||
+                            resLower.contains("widgets_bottom_sheet") || resLower.contains("preview_container")) {
+                            return VIEW_TYPE_WIDGET;
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // 2. Check for All Apps Drawer & Search
             if (nameLower.contains("allapps") || nameLower.contains("all_apps") ||
                 nameLower.contains("smartfolder") || nameLower.contains("smartfullsheet") ||
                 nameLower.contains("category") || nameLower.contains("search") ||
@@ -949,15 +990,19 @@ public class XposedInit implements IXposedHookLoadPackage {
                 }
             } catch (Throwable ignored) {}
 
+            // 3. Check for Folder
             if (name.contains("FolderPagedView") || (name.contains("Folder") && !name.contains("FolderIcon"))) {
                 return VIEW_TYPE_FOLDER;
             }
+
+            // 4. Check for Workspace / Hotseat
             if (name.contains("Workspace") || name.contains("Hotseat")) {
                 return VIEW_TYPE_WORKSPACE;
             }
+
             p = pv.getParent();
         }
-        return VIEW_TYPE_WORKSPACE;
+        return VIEW_TYPE_UNKNOWN;
     }
 
     private static boolean isInsideFolder(View view) {
@@ -1391,17 +1436,28 @@ public class XposedInit implements IXposedHookLoadPackage {
 
     private static void cleanDrawableIcon(Object drawable) {
         if (drawable == null) return;
-        try {
-            if (drawable instanceof Drawable) {
-                Drawable.Callback cb = ((Drawable) drawable).getCallback();
-                if (cb instanceof View) {
-                    int viewType = getViewType((View) cb);
-                    if (viewType == VIEW_TYPE_ALL_APPS) {
-                        return; // Do NOT strip plates or alter delegates in the App Drawer!
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
+        if (!(drawable instanceof Drawable)) return;
+
+        Drawable.Callback cb = ((Drawable) drawable).getCallback();
+        if (!(cb instanceof View)) {
+            // NEVER alter drawables that do not belong to an attached View
+            return;
+        }
+
+        View cbView = (View) cb;
+        int viewType = getViewType(cbView);
+
+        // ONLY desktop and folder app icons need plate removal and adaptive glyph tinting!
+        // All apps drawer, search, widgets, and popups MUST remain 100% untouched in their native state!
+        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER) {
+            return;
+        }
+
+        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView or FolderIcon)
+        String viewClassName = cbView.getClass().getName();
+        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon")) {
+            return;
+        }
 
         boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
         int targetFg = isDark ? 0xFFFFFFFF : 0xFF000000;
