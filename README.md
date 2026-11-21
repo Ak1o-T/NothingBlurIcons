@@ -26,6 +26,7 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 ## ✨ Features
 
 - 🪟 **Authentic Frosted Glass Blur:** Hooks directly into Nothing OS 5.0's proprietary `FrostedBackdropProvider` and `FrostedBackdropDrawable` — 100% identical in blur radius, lighting, and tint to official Nothing OS 5.0 widgets (Clock, Weather, Media Player).
+- 🌟 **Dynamic Drag & Drop Blur:** Icons smoothly render real-time live wallpaper blur while being dragged across the home screen at 120 FPS, perfectly matching the native Nothing OS widget dragging aesthetic.
 - 📁 **Smart Folder Separation:** Icons inside opened folders dynamically receive an adaptive glass tone (soft milky-white highlight in Light Mode / smoked dark glass in Dark Mode) so that circular icon plates cleanly stand out from the folder's glass backdrop without blending in.
 - 🚀 **Buttery Smooth 120 FPS:** Zero lag or stutter. Highly optimized with frame-rate throttled invalidations (8ms budget), reflection lookup caching, and weak view-type caching. Measured jank rate under 2.0% on Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Classic Monochrome in All Apps & Search:** Automatically resolves and applies authentic Nothing OS monochrome themed icons in the app drawer and universal search bar with native charcoal/off-white plates.
@@ -104,6 +105,7 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 ## ✨ Возможности и особенности
 
 - 🪟 **Настоящее матовое стекло:** Подключается напрямую к фирменному движку Nothing OS 5.0 (`FrostedBackdropProvider` и `FrostedBackdropDrawable`) — радиус размытия, глубина и оттенок на 100% совпадают с системными виджетами Nothing OS 5.0 (Часы, Погода, Плеер).
+- 🌟 **Живое размытие при перетаскивании (Drag & Drop):** При перемещении иконок по рабочему столу фон обоев размывается в реальном времени на скорости 120 FPS, в точности повторяя эстетику нативных виджетов и папок Nothing OS.
 - 📁 **Умное отделение иконок в папках:** Внутри открытых папок круги иконок автоматически адаптируют оттенок (деликатное молочно-белое стекло в светлой теме / стильное тёмное дымчатое стекло в тёмной теме), благодаря чему они отчётливо видны и не сливаются с задним фоном самой папки.
 - 🚀 **Идеальные 120 FPS:** Никаких просадок и фризов. Полный аппаратный троттлинг перерисовок под 8 мс (120 Гц), кэширование рефлексии и отсутствие аллокаций памяти в цикле отрисовки. Уровень пропущенных кадров (jank rate) менее 2.0% на Snapdragon SM8735 / Nothing Phone (3).
 - 🔍 **Классический монохром в меню приложений и поиске:** Автоматически подставляет оригинальные монохромные иконки Nothing на фирменных плашках в общем списке приложений и в поисковой строке.

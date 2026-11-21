@@ -13,8 +13,11 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -25,6 +28,7 @@ import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.lang.reflect.Field;
@@ -453,6 +457,84 @@ public class XposedInit implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {}
         }
 
+        // --- REAL-TIME DRAG & DROP DYNAMIC WALLPAPER BLUR ---
+        try {
+            Class<?> dragViewClass = XposedHelpers.findClass("com.android.launcher3.dragndrop.DragView", lpparam.classLoader);
+            if (dragViewClass != null) {
+                XC_MethodHook dragViewInitHook = new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        final View dragView = (View) param.thisObject;
+                        if (isAppIconDrag(dragView)) {
+                            setupDragViewFrostedLayer(dragView);
+                        }
+                    }
+                };
+
+                // Do NOT hook constructors: wait until setItemInfo and show so dragInfo and itemType are fully initialized
+                XposedBridge.hookAllMethods(dragViewClass, "setItemInfo", dragViewInitHook);
+                XposedBridge.hookAllMethods(dragViewClass, "show", dragViewInitHook);
+                XposedBridge.hookAllMethods(dragViewClass, "onAttachedToWindow", dragViewInitHook);
+
+                XposedBridge.hookAllMethods(dragViewClass, "drawFolderFrostedLayer", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final View dragView = (View) param.thisObject;
+                        if (dragView == null) return;
+
+                        if (isAppIconDrag(dragView)) {
+                            Canvas canvas = (Canvas) param.args[0];
+                            if (canvas != null) {
+                                drawAppIconFrostedLayer(dragView, canvas);
+                            }
+                            // Cancel native drawFolderFrostedLayer to avoid offset mismatch and outer rim
+                            param.setResult(null);
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(dragViewClass, "draw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        final View dragView = (View) param.thisObject;
+                        if (dragView == null) return;
+                        if (!isAppIconDrag(dragView)) return;
+
+                        // Ensure mContent is VISIBLE and properly sanitized
+                        try {
+                            Object content = XposedHelpers.getObjectField(dragView, "mContent");
+                            if (content instanceof View) {
+                                ((View) content).setVisibility(View.VISIBLE);
+                                if (content instanceof ImageView) {
+                                    Drawable cd = ((ImageView) content).getDrawable();
+                                    if (cd != null) {
+                                        sanitizeDragIconDrawable(cd);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+
+                        // Replace mBgSpringDrawable with transparent
+                        try {
+                            XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
+                        } catch (Throwable ignored) {}
+
+                        // Inspect and sanitize mFgSpringDrawable if present
+                        try {
+                            Object fg = XposedHelpers.getObjectField(dragView, "mFgSpringDrawable");
+                            if (fg instanceof Drawable) {
+                                sanitizeDragIconDrawable((Drawable) fg);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                });
+
+                Log.i(TAG, "Successfully hooked DragView for 120 FPS dynamic Drag & Drop wallpaper blur!");
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to hook DragView: " + t.getMessage());
+        }
+
         // 4. Hook FastBitmapDrawable.draw and delegates to sanitize plates and enforce theme colors
         try {
             Class<?> fbdClass = XposedHelpers.findClass("com.android.launcher3.icons.FastBitmapDrawable", lpparam.classLoader);
@@ -488,6 +570,12 @@ public class XposedInit implements IXposedHookLoadPackage {
                         TextView view = (TextView) obj;
                         Canvas canvas = (Canvas) param.args[0];
                         if (canvas == null) return;
+
+                        // Never render a backdrop for BubbleTextView inside FolderIcon (desktop closed folder preview)
+                        ViewParent parent = view.getParent();
+                        if (parent != null && parent.getClass().getName().contains("FolderIcon")) {
+                            return;
+                        }
 
                         // Fast-path cached icon bounds (avoids reflection and object allocations on every frame)
                         Rect blurBounds = iconBoundsCache.get(view);
@@ -1210,6 +1298,328 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable ignored) {}
     }
 
+    private static boolean isAppIconDrag(View dragView) {
+        if (dragView == null) return false;
+
+        try {
+            Boolean c = (Boolean) XposedHelpers.callMethod(dragView, "isLiveCardDragging");
+            if (c != null && c) return false;
+        } catch (Throwable ignored) {}
+        try {
+            Boolean wCheck = (Boolean) XposedHelpers.callMethod(dragView, "containsAppWidgetHostView");
+            if (wCheck != null && wCheck) return false;
+        } catch (Throwable ignored) {}
+
+        int itemType = -999;
+        try {
+            itemType = XposedHelpers.getIntField(dragView, "mItemType");
+            // itemType 2 = folder, 4 = appwidget, 5 = custom appwidget, 100 = Nothing Card/Widget
+            if (itemType == 2 || itemType == 4 || itemType == 5 || itemType == 100) {
+                return false;
+            }
+        } catch (Throwable ignored) {}
+
+        int w = dragView.getWidth();
+        int h = dragView.getHeight();
+        if (w <= 0) {
+            try { w = XposedHelpers.getIntField(dragView, "mWidth"); } catch (Throwable ignored) {}
+        }
+        if (h <= 0) {
+            try { h = XposedHelpers.getIntField(dragView, "mHeight"); } catch (Throwable ignored) {}
+        }
+        // Normal 1x1 app icons on Nothing OS are ~192px-240px (+ blur outline up to ~280px).
+        // Widgets (2x2, 4x2) are 500px+ and must never be treated as 1x1 circular icons.
+        if (w > 380 || h > 380) {
+            return false;
+        }
+
+        try {
+            Object activity = XposedHelpers.getObjectField(dragView, "mActivity");
+            if (activity != null) {
+                Object dc = XposedHelpers.callMethod(activity, "getDragController");
+                if (dc != null) {
+                    Object dragObj = XposedHelpers.callMethod(dc, "getDragObject");
+                    if (dragObj != null) {
+                        Object source = XposedHelpers.getObjectField(dragObj, "dragSource");
+                        if (source != null) {
+                            String sName = source.getClass().getName();
+                            // Do NOT use generic contains("widget") because android.widget.* contains "widget"!
+                            if (sName.contains("WidgetPicker") || sName.contains("NtWidget") || sName.contains("de.e")) {
+                                return false;
+                            }
+                        }
+
+                        Object dragInfo = XposedHelpers.getObjectField(dragObj, "dragInfo");
+                        if (dragInfo != null) {
+                            String infoName = dragInfo.getClass().getName();
+                            if (infoName.contains("AppWidget") || infoName.contains("Folder") ||
+                                infoName.contains("PendingAddWidget") || infoName.contains("LauncherCard")) {
+                                return false;
+                            }
+
+                            try {
+                                int spanX = XposedHelpers.getIntField(dragInfo, "spanX");
+                                int spanY = XposedHelpers.getIntField(dragInfo, "spanY");
+                                if (spanX > 1 || spanY > 1) {
+                                    return false;
+                                }
+                            } catch (Throwable ignored) {}
+
+                            int dType = XposedHelpers.getIntField(dragInfo, "itemType");
+                            if (dType == 2 || dType == 4 || dType == 5 || dType == 100) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Object content = XposedHelpers.getObjectField(dragView, "mContent");
+            if (content != null) {
+                String cName = content.getClass().getName();
+                // Notice: do NOT check contains("widget") because android.widget.ImageView contains "widget"!
+                if (cName.contains("AppWidget") || cName.contains("LauncherCard") || cName.contains("Folder")) {
+                    return false;
+                }
+
+                if (content instanceof View) {
+                    Object tag = ((View) content).getTag();
+                    if (tag != null) {
+                        String tagClass = tag.getClass().getName();
+                        if (tagClass.contains("AppWidget") || tagClass.contains("Folder") ||
+                            tagClass.contains("PendingAddWidget") || tagClass.contains("LauncherCard")) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        return true;
+    }
+
+    private static Rect getDragViewIconBounds(View dragView) {
+        int w = dragView.getWidth();
+        int h = dragView.getHeight();
+        if (w <= 0) w = XposedHelpers.getIntField(dragView, "mWidth");
+        if (h <= 0) h = XposedHelpers.getIntField(dragView, "mHeight");
+
+        try {
+            Object maskPath = XposedHelpers.getObjectField(dragView, "mScaledMaskPath");
+            if (maskPath instanceof Path) {
+                RectF pathBounds = new RectF();
+                ((Path) maskPath).computeBounds(pathBounds, true);
+                if (pathBounds.width() > 10 && pathBounds.height() > 10) {
+                    return new Rect(
+                        Math.round(pathBounds.left),
+                        Math.round(pathBounds.top),
+                        Math.round(pathBounds.right),
+                        Math.round(pathBounds.bottom)
+                    );
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Object bg = XposedHelpers.getObjectField(dragView, "mBgSpringDrawable");
+            if (bg instanceof Drawable) {
+                Rect bounds = ((Drawable) bg).getBounds();
+                if (bounds != null && !bounds.isEmpty()) {
+                    return new Rect(bounds);
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        int outline = 0;
+        try {
+            outline = XposedHelpers.getIntField(dragView, "mBlurSizeOutline");
+        } catch (Throwable ignored) {}
+        if (outline <= 0) {
+            try {
+                Context ctx = dragView.getContext();
+                int resId = ctx.getResources().getIdentifier("blur_size_medium_outline", "dimen", ctx.getPackageName());
+                if (resId != 0) {
+                    outline = ctx.getResources().getDimensionPixelSize(resId);
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (outline <= 0) outline = 28;
+
+        int half = outline / 2;
+        int iconW = Math.max(1, w - outline);
+        int iconH = Math.max(1, h - outline);
+        return new Rect(half, half, half + iconW, half + iconH);
+    }
+
+    private static void setupDragViewFrostedLayer(View dragView) {
+        if (dragView == null) return;
+        if (!isAppIconDrag(dragView)) return;
+        try {
+            Rect iconBounds = getDragViewIconBounds(dragView);
+
+            Object existing = XposedHelpers.getObjectField(dragView, "mFolderFrostedDrawable");
+            if (existing instanceof Drawable) {
+                Drawable d = (Drawable) existing;
+                Rect bounds = d.getBounds();
+                if (!bounds.equals(iconBounds)) {
+                    d.setBounds(iconBounds);
+                    float radius = iconBounds.width() / 2.0f;
+                    if (setClipRadiusMethod != null) {
+                        setClipRadiusMethod.invoke(d, radius);
+                    }
+                }
+                // Always ensure mBgSpringDrawable is transparent
+                try {
+                    XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
+                } catch (Throwable ignored) {}
+                return;
+            }
+
+            Context ctx = dragView.getContext();
+            Object provider = getFrostedProvider(ctx, dragView.getClass().getClassLoader());
+            if (provider == null || drawableClass == null) return;
+
+            Drawable frostedDrawable = (Drawable) XposedHelpers.newInstance(drawableClass, ctx, provider);
+            if (frostedDrawable == null) return;
+
+            frostedDrawable.setCallback(null);
+            if (setAnimateEntranceMethod != null) {
+                setAnimateEntranceMethod.invoke(frostedDrawable, false);
+            }
+            if (completeTransitionNowMethod != null) {
+                completeTransitionNowMethod.invoke(frostedDrawable);
+            }
+
+            frostedDrawable.setBounds(iconBounds);
+            float radius = iconBounds.width() / 2.0f;
+            if (setClipRadiusMethod != null) {
+                setClipRadiusMethod.invoke(frostedDrawable, radius);
+            }
+
+            XposedHelpers.setObjectField(dragView, "mFolderFrostedDrawable", frostedDrawable);
+
+            // Suppress mBgSpringDrawable so it NEVER draws an opaque plate over the blur
+            try {
+                XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
+            } catch (Throwable ignored) {}
+
+            // Sanitize mContent and mFgSpringDrawable so they are stripped of opaque plates
+            try {
+                Object content = XposedHelpers.getObjectField(dragView, "mContent");
+                if (content instanceof View) {
+                    ((View) content).setVisibility(View.VISIBLE);
+                    if (content instanceof ImageView) {
+                        Drawable cd = ((ImageView) content).getDrawable();
+                        if (cd != null) sanitizeDragIconDrawable(cd);
+                    }
+                }
+            } catch (Throwable ignored) {}
+            try {
+                Object fg = XposedHelpers.getObjectField(dragView, "mFgSpringDrawable");
+                if (fg instanceof Drawable) sanitizeDragIconDrawable((Drawable) fg);
+            } catch (Throwable ignored) {}
+
+            Log.i(TAG, "Attached live FrostedBackdropDrawable to DragView: " + iconBounds.width() + "x" + iconBounds.height() + " at " + iconBounds);
+        } catch (Throwable t) {
+            Log.e(TAG, "setupDragViewFrostedLayer failed: " + t.getMessage());
+        }
+    }
+
+    private static void sanitizeDragIconDrawable(Drawable drawable) {
+        if (drawable == null) return;
+
+        if (drawable instanceof android.graphics.drawable.InsetDrawable) {
+            Drawable inner = ((android.graphics.drawable.InsetDrawable) drawable).getDrawable();
+            if (inner != null) sanitizeDragIconDrawable(inner);
+            return;
+        }
+
+        boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
+        int targetFg = isDark ? 0xFFF1F1F1 : 0xFF303030;
+
+        // Ensure FastBitmapDrawable's main paint does NOT tint the entire bitmap
+        try {
+            Paint p = (Paint) XposedHelpers.getObjectField(drawable, "paint");
+            if (p != null) {
+                p.setColorFilter(null);
+            }
+        } catch (Throwable ignored) {}
+
+        // Sanitize inner delegate
+        try {
+            Object delegate = XposedHelpers.getObjectField(drawable, "delegate");
+            if (delegate != null) {
+                sanitizeDelegate(delegate, isDark);
+            }
+        } catch (Throwable ignored) {}
+
+        // Strip plate from bitmapInfo.icon
+        try {
+            Object info = XposedHelpers.getObjectField(drawable, "bitmapInfo");
+            if (info != null) {
+                Bitmap icon = (Bitmap) XposedHelpers.getObjectField(info, "icon");
+                if (icon != null && !icon.isRecycled()) {
+                    Bitmap cleaned = getCleanedBitmap(icon);
+                    if (cleaned != null && cleaned != icon) {
+                        XposedHelpers.setObjectField(info, "icon", cleaned);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // Strip plate from mBitmap directly
+        try {
+            Bitmap bmp = (Bitmap) XposedHelpers.getObjectField(drawable, "mBitmap");
+            if (bmp != null && !bmp.isRecycled()) {
+                Bitmap cleaned = getCleanedBitmap(bmp);
+                if (cleaned != null && cleaned != bmp) {
+                    XposedHelpers.setObjectField(drawable, "mBitmap", cleaned);
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        drawable.invalidateSelf();
+    }
+
+    private static void drawAppIconFrostedLayer(View dragView, Canvas canvas) {
+        try {
+            setupDragViewFrostedLayer(dragView);
+
+            Object frostedObj = XposedHelpers.getObjectField(dragView, "mFolderFrostedDrawable");
+            if (!(frostedObj instanceof Drawable) || updateOffsetMethod == null) return;
+            Drawable frostedDrawable = (Drawable) frostedObj;
+
+            Rect iconBounds = getDragViewIconBounds(dragView);
+            float radius = iconBounds.width() / 2.0f;
+
+            if (setClipRadiusMethod != null) {
+                setClipRadiusMethod.invoke(frostedDrawable, radius);
+            }
+            frostedDrawable.setBounds(iconBounds);
+
+            int[] tempLoc = (int[]) XposedHelpers.getObjectField(dragView, "mTempLoc");
+            if (tempLoc == null) {
+                tempLoc = new int[2];
+            }
+            dragView.getLocationOnScreen(tempLoc);
+
+            float scaleX = dragView.getScaleX();
+            float scaleY = dragView.getScaleY();
+            float screenX = tempLoc[0] + iconBounds.left * scaleX;
+            float screenY = tempLoc[1] + iconBounds.top * scaleY;
+
+            updateOffsetMethod.invoke(frostedDrawable, screenX, screenY);
+            frostedDrawable.draw(canvas);
+
+            // Ensure mBgSpringDrawable stays 100% transparent
+            XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
+        } catch (Throwable t) {
+            Log.e(TAG, "drawAppIconFrostedLayer failed: " + t.getMessage());
+        }
+    }
+
     private static void scheduleLauncherRefresh(final Object launcherObj) {
         Object target = (launcherObj != null) ? launcherObj : activeLauncherInstance;
         if (target == null) return;
@@ -1390,32 +1800,58 @@ public class XposedInit implements IXposedHookLoadPackage {
             int[] pixels = new int[w * h];
             swBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
 
-            boolean hasTranslucentDisk = false;
+            boolean hasDisk = false;
             int sampleIdx1 = (h / 6) * w + (w / 2);
             int sampleA1 = (pixels[sampleIdx1] >>> 24);
             int sampleIdx2 = (h / 2) * w + (w / 6);
             int sampleA2 = (pixels[sampleIdx2] >>> 24);
-            int diskAlpha = 0;
+            int pr = 0, pg = 0, pb = 0, pa = 0;
 
             if (sampleA1 > 0 && sampleA1 <= 160) {
-                hasTranslucentDisk = true;
-                diskAlpha = sampleA1;
+                hasDisk = true;
+                pa = sampleA1;
             } else if (sampleA2 > 0 && sampleA2 <= 160) {
-                hasTranslucentDisk = true;
-                diskAlpha = sampleA2;
+                hasDisk = true;
+                pa = sampleA2;
+            } else if (sampleA1 == 255 && sampleA2 == 255) {
+                int p1 = pixels[sampleIdx1];
+                int p2 = pixels[sampleIdx2];
+                int r1 = (p1 >> 16) & 0xFF, g1 = (p1 >> 8) & 0xFF, b1 = p1 & 0xFF;
+                int r2 = (p2 >> 16) & 0xFF, g2 = (p2 >> 8) & 0xFF, b2 = p2 & 0xFF;
+                if (Math.abs(r1 - r2) <= 15 && Math.abs(g1 - g2) <= 15 && Math.abs(b1 - b2) <= 15) {
+                    hasDisk = true;
+                    pa = 255;
+                    pr = r1;
+                    pg = g1;
+                    pb = b1;
+                }
             }
 
-            if (hasTranslucentDisk) {
+            if (hasDisk) {
                 if (swBitmap == icon) {
                     swBitmap = icon.copy(Bitmap.Config.ARGB_8888, true);
                     swBitmap.getPixels(pixels, 0, w, 0, 0, w, h);
                 }
 
-                int maxDiskAlpha = Math.max(diskAlpha, 130);
-                for (int i = 0; i < pixels.length; i++) {
-                    int a = (pixels[i] >>> 24);
-                    if (a > 0 && a <= maxDiskAlpha + 5) {
-                        pixels[i] = 0;
+                if (pa <= 160) {
+                    int maxDiskAlpha = Math.max(pa, 130);
+                    for (int i = 0; i < pixels.length; i++) {
+                        int a = (pixels[i] >>> 24);
+                        if (a > 0 && a <= maxDiskAlpha + 5) {
+                            pixels[i] = 0;
+                        }
+                    }
+                } else {
+                    for (int i = 0; i < pixels.length; i++) {
+                        int px = pixels[i];
+                        int a = (px >>> 24);
+                        if (a == 0) continue;
+                        int r = (px >> 16) & 0xFF;
+                        int g = (px >> 8) & 0xFF;
+                        int b = px & 0xFF;
+                        if (Math.abs(r - pr) <= 25 && Math.abs(g - pg) <= 25 && Math.abs(b - pb) <= 25) {
+                            pixels[i] = 0;
+                        }
                     }
                 }
                 swBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
@@ -1446,16 +1882,44 @@ public class XposedInit implements IXposedHookLoadPackage {
 
         View cbView = (View) cb;
         int viewType = getViewType(cbView);
+        String viewClassName = cbView.getClass().getName();
 
-        // ONLY desktop and folder app icons need plate removal and adaptive glyph tinting!
+        boolean isDrag = false;
+        View dragView = null;
+        if (cbView.getClass().getName().contains("DragView")) {
+            isDrag = true;
+            dragView = cbView;
+        } else {
+            ViewParent parentView = cbView.getParent();
+            while (parentView != null) {
+                String pName = parentView.getClass().getName();
+                if (pName.contains("DragView")) {
+                    isDrag = true;
+                    if (parentView instanceof View) {
+                        dragView = (View) parentView;
+                    }
+                    break;
+                }
+                parentView = parentView.getParent();
+            }
+        }
+
+        if (isDrag) {
+            // Strictly verify if this DragView is actually an app icon drag!
+            // If it is a widget or folder being dragged, NEVER clean or tint its drawable!
+            if (dragView != null && !isAppIconDrag(dragView)) {
+                return;
+            }
+        }
+
+        // ONLY desktop, folder, and actively dragged app icons need plate removal and adaptive glyph tinting!
         // All apps drawer, search, widgets, and popups MUST remain 100% untouched in their native state!
-        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER) {
+        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER && !isDrag) {
             return;
         }
 
-        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView or FolderIcon)
-        String viewClassName = cbView.getClass().getName();
-        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon")) {
+        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView, FolderIcon, or DragView)
+        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon") && !isDrag) {
             return;
         }
 
