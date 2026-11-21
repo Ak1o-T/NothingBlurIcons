@@ -19,6 +19,7 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
@@ -483,11 +484,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                         if (dragView == null) return;
 
                         if (isAppIconDrag(dragView)) {
-                            Canvas canvas = (Canvas) param.args[0];
-                            if (canvas != null) {
-                                drawAppIconFrostedLayer(dragView, canvas);
-                            }
-                            // Cancel native drawFolderFrostedLayer to avoid offset mismatch and outer rim
+                            // Cancel native drawFolderFrostedLayer because draw hook manages the frosted layer
                             param.setResult(null);
                         }
                     }
@@ -500,32 +497,82 @@ public class XposedInit implements IXposedHookLoadPackage {
                         if (dragView == null) return;
                         if (!isAppIconDrag(dragView)) return;
 
-                        // Ensure mContent is VISIBLE and properly sanitized
+                        Canvas canvas = (Canvas) param.args[0];
+                        if (canvas == null) return;
+
+                        // 1. Render authentic FrostedBackdropDrawable behind the icon
+                        drawAppIconFrostedLayer(dragView, canvas);
+
+                        // 2. Mark mHasDrawn = true
                         try {
-                            Object content = XposedHelpers.getObjectField(dragView, "mContent");
-                            if (content instanceof View) {
-                                ((View) content).setVisibility(View.VISIBLE);
-                                if (content instanceof ImageView) {
-                                    Drawable cd = ((ImageView) content).getDrawable();
-                                    if (cd != null) {
-                                        sanitizeDragIconDrawable(cd);
-                                    }
+                            XposedHelpers.setObjectField(dragView, "mHasDrawn", Boolean.TRUE);
+                        } catch (Throwable ignored) {}
+
+                        // 3. Inspect if mScaledMaskPath is active (spring dynamics mode)
+                        Path scaledMask = null;
+                        try {
+                            scaledMask = (Path) XposedHelpers.getObjectField(dragView, "mScaledMaskPath");
+                        } catch (Throwable ignored) {}
+
+                        if (scaledMask != null) {
+                            int save = canvas.save();
+                            canvas.clipPath(scaledMask);
+
+                            // IMPORTANT: mBgSpringDrawable is Nothing's opaque #303030 plate.
+                            // We deliberately DO NOT DRAW IT at all! Only the frosted glass shines behind!
+
+                            // Translate canvas according to physics springs (mTranslateX, mTranslateY)
+                            try {
+                                Object trX = XposedHelpers.getObjectField(dragView, "mTranslateX");
+                                Object trY = XposedHelpers.getObjectField(dragView, "mTranslateY");
+                                float valX = 0f;
+                                float valY = 0f;
+                                if (trX != null) {
+                                    Object v = XposedHelpers.getObjectField(trX, "mValue");
+                                    if (v instanceof Number) valX = ((Number) v).floatValue();
                                 }
-                            }
-                        } catch (Throwable ignored) {}
+                                if (trY != null) {
+                                    Object v = XposedHelpers.getObjectField(trY, "mValue");
+                                    if (v instanceof Number) valY = ((Number) v).floatValue();
+                                }
+                                canvas.translate(valX, valY);
+                            } catch (Throwable ignored) {}
 
-                        // Replace mBgSpringDrawable with transparent
-                        try {
-                            XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
-                        } catch (Throwable ignored) {}
+                            // Draw foreground icon glyph
+                            try {
+                                Object fg = XposedHelpers.getObjectField(dragView, "mFgSpringDrawable");
+                                if (fg instanceof Drawable) {
+                                    sanitizeDragIconDrawable((Drawable) fg);
+                                    ((Drawable) fg).draw(canvas);
+                                }
+                            } catch (Throwable ignored) {}
 
-                        // Inspect and sanitize mFgSpringDrawable if present
-                        try {
-                            Object fg = XposedHelpers.getObjectField(dragView, "mFgSpringDrawable");
-                            if (fg instanceof Drawable) {
-                                sanitizeDragIconDrawable((Drawable) fg);
-                            }
-                        } catch (Throwable ignored) {}
+                            canvas.restoreToCount(save);
+
+                            // Draw badge (e.g. work profile badge)
+                            try {
+                                Object badge = XposedHelpers.getObjectField(dragView, "mBadge");
+                                if (badge instanceof Drawable) {
+                                    ((Drawable) badge).draw(canvas);
+                                }
+                            } catch (Throwable ignored) {}
+                        } else {
+                            // If mScaledMaskPath is not ready yet, render content view
+                            try {
+                                Object content = XposedHelpers.getObjectField(dragView, "mContent");
+                                if (content instanceof View) {
+                                    View cv = (View) content;
+                                    if (cv instanceof ImageView) {
+                                        Drawable cd = ((ImageView) cv).getDrawable();
+                                        if (cd != null) sanitizeDragIconDrawable(cd);
+                                    }
+                                    cv.draw(canvas);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+
+                        // CANCEL native draw method so mBgSpringDrawable is NEVER drawn!
+                        param.setResult(null);
                     }
                 });
 
@@ -533,6 +580,83 @@ public class XposedInit implements IXposedHookLoadPackage {
             }
         } catch (Throwable t) {
             Log.e(TAG, "Failed to hook DragView: " + t.getMessage());
+        }
+
+        // --- AUTHENTIC FROSTED BLUR ON LONG-PRESS POPUP HIGHLIGHT ---
+        try {
+            Class<?> ntArrowPopupClass = XposedHelpers.findClass("com.nothing.launcher.popup.NTArrowPopup", lpparam.classLoader);
+            if (ntArrowPopupClass != null) {
+                XposedBridge.hookAllMethods(ntArrowPopupClass, "createHighlightView", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        final View highlightView = (View) param.getResult();
+                        if (highlightView == null) return;
+
+                        Object arg0 = (param.args != null && param.args.length > 0) ? param.args[0] : null;
+                        int iconSize = 0;
+                        if (arg0 != null) {
+                            try {
+                                iconSize = ((Integer) XposedHelpers.callMethod(arg0, "getIconSize")).intValue();
+                            } catch (Throwable ignored) {}
+                        }
+                        if (iconSize <= 0) {
+                            iconSize = highlightView.getWidth();
+                        }
+                        if (iconSize <= 0) {
+                            ViewGroup.LayoutParams lp = highlightView.getLayoutParams();
+                            if (lp != null && lp.width > 0) iconSize = lp.width;
+                        }
+                        if (iconSize <= 0) iconSize = 192;
+
+                        final Drawable bg = highlightView.getBackground();
+                        if (bg != null) {
+                            sanitizeDragIconDrawable(bg);
+                        }
+
+                        Context ctx = highlightView.getContext();
+                        Object provider = getFrostedProvider(ctx, highlightView.getClass().getClassLoader());
+                        if (provider != null && drawableClass != null) {
+                            final Drawable frostedDrawable = (Drawable) XposedHelpers.newInstance(drawableClass, ctx, provider);
+                            if (frostedDrawable != null) {
+                                frostedDrawable.setCallback(null);
+                                if (setAnimateEntranceMethod != null) {
+                                    setAnimateEntranceMethod.invoke(frostedDrawable, false);
+                                }
+                                if (completeTransitionNowMethod != null) {
+                                    completeTransitionNowMethod.invoke(frostedDrawable);
+                                }
+
+                                frostedDrawable.setBounds(0, 0, iconSize, iconSize);
+                                float radius = iconSize / 2.0f;
+                                if (setClipRadiusMethod != null) {
+                                    setClipRadiusMethod.invoke(frostedDrawable, radius);
+                                }
+
+                                if (bg != null) {
+                                    bg.setBounds(0, 0, iconSize, iconSize);
+                                    LayerDrawable layer = new LayerDrawable(new Drawable[]{ frostedDrawable, bg }) {
+                                        @Override
+                                        public void draw(Canvas canvas) {
+                                            try {
+                                                int[] loc = new int[2];
+                                                highlightView.getLocationOnScreen(loc);
+                                                if (updateOffsetMethod != null) {
+                                                    updateOffsetMethod.invoke(frostedDrawable, (float) loc[0], (float) loc[1]);
+                                                }
+                                            } catch (Throwable ignored) {}
+                                            super.draw(canvas);
+                                        }
+                                    };
+                                    highlightView.setBackground(layer);
+                                }
+                            }
+                        }
+                    }
+                });
+                Log.i(TAG, "Successfully hooked NTArrowPopup.createHighlightView for frosted popup highlight!");
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to hook NTArrowPopup: " + t.getMessage());
         }
 
         // 4. Hook FastBitmapDrawable.draw and delegates to sanitize plates and enforce theme colors
@@ -1301,6 +1425,12 @@ public class XposedInit implements IXposedHookLoadPackage {
     private static boolean isAppIconDrag(View dragView) {
         if (dragView == null) return false;
 
+        // If scaledMaskPath is present, it is 100% an app icon drag!
+        try {
+            Object mask = XposedHelpers.getObjectField(dragView, "mScaledMaskPath");
+            if (mask != null) return true;
+        } catch (Throwable ignored) {}
+
         try {
             Boolean c = (Boolean) XposedHelpers.callMethod(dragView, "isLiveCardDragging");
             if (c != null && c) return false;
@@ -1611,7 +1741,23 @@ public class XposedInit implements IXposedHookLoadPackage {
             float screenY = tempLoc[1] + iconBounds.top * scaleY;
 
             updateOffsetMethod.invoke(frostedDrawable, screenX, screenY);
+
+            Path scaledMask = null;
+            try {
+                scaledMask = (Path) XposedHelpers.getObjectField(dragView, "mScaledMaskPath");
+            } catch (Throwable ignored) {}
+
+            int save = -1;
+            if (scaledMask != null) {
+                save = canvas.save();
+                canvas.clipPath(scaledMask);
+            }
+
             frostedDrawable.draw(canvas);
+
+            if (save >= 0) {
+                canvas.restoreToCount(save);
+            }
 
             // Ensure mBgSpringDrawable stays 100% transparent
             XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
@@ -1912,14 +2058,24 @@ public class XposedInit implements IXposedHookLoadPackage {
             }
         }
 
-        // ONLY desktop, folder, and actively dragged app icons need plate removal and adaptive glyph tinting!
-        // All apps drawer, search, widgets, and popups MUST remain 100% untouched in their native state!
-        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER && !isDrag) {
+        boolean isHighlight = false;
+        try {
+            if (cbView.getId() != View.NO_ID && cbView.getResources() != null) {
+                String entry = cbView.getResources().getResourceEntryName(cbView.getId());
+                if ("pop_up_highlight_icon".equals(entry)) {
+                    isHighlight = true;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // ONLY desktop, folder, actively dragged app icons, and popup highlight icons need plate removal and adaptive glyph tinting!
+        // All apps drawer, search, and widgets MUST remain 100% untouched in their native state!
+        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER && !isDrag && !isHighlight) {
             return;
         }
 
-        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView, FolderIcon, or DragView)
-        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon") && !isDrag) {
+        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView, FolderIcon, DragView, or popup highlight)
+        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon") && !isDrag && !isHighlight) {
             return;
         }
 
