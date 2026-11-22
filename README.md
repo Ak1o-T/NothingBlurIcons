@@ -60,6 +60,9 @@ Requires a Nothing smartphone running **Nothing OS 5.0** (Android 17):
 
 **Note**: I don't own any other Nothing devices besides the Phone (3), so I cannot guarantee proper functionality on other models running the stable Nothing OS 5.0 release. Install at your own risk.
 
+## ⚠️ Known Issues
+- **Visual artifacts during drag & drop on certain cells:** When dragging icons across specific home screen cells (especially over high-contrast or bright wallpaper areas), a faint crescent or outline artifact may appear beneath the icon. This occurs due to translucent background plates baked directly into third-party icon pack PNGs (such as IconGen), which overlay on top of Nothing OS's frosted glass layer. Work on a seamless resolution is in progress.
+
 ## 🛠️ Prerequisites & Installation
 
 ### 1. Requirements
@@ -138,6 +141,9 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 - **Nothing Phone (3)** — протестировано и подтверждено ✅
 
 **Примечание**: У меня нет других моделей Nothing, кроме Phone (3), поэтому я не могу гарантировать корректную работу на остальных устройствах с релизной Nothing OS 5.0. Устанавливайте на свой страх и риск.
+
+## ⚠️ Известные особенности и ограничения
+- **Визуальные артефакты при перетаскивании в некоторых областях:** При перемещении иконки между определёнными ячейками рабочего стола (особенно на светлых или контрастных участках обоев) может проявляться серый контур / полумесяц под иконкой. Это связано с тем, что сторонние генераторы иконок (в частности, IconGen) запекают полупрозрачную подложку в PNG самих иконок, накладывающуюся поверх системного размытия Nothing OS. Способ бесшовного решения этой особенности находится в исследовании.
 
 ## 🛠️ Требования и установка
 
