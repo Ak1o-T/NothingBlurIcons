@@ -2,5 +2,6 @@
 <resources>
     <string-array name="xposed_scope">
         <item>com.nothing.launcher</item>
+        <item>space.linuxct.nothing.icongen</item>
     </string-array>
 </resources>

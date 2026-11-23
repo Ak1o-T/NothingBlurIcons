@@ -119,6 +119,11 @@ public class XposedInit implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
+        if ("space.linuxct.nothing.icongen".equals(lpparam.packageName)) {
+            hookIconGen(lpparam);
+            return;
+        }
+
         if (!"com.nothing.launcher".equals(lpparam.packageName)) {
             return;
         }
@@ -694,6 +699,11 @@ public class XposedInit implements IXposedHookLoadPackage {
                         TextView view = (TextView) obj;
                         Canvas canvas = (Canvas) param.args[0];
                         if (canvas == null) return;
+
+                        // Never render frosted backdrop into software canvas (used by Launcher for drag bitmap capture & snapshots)
+                        if (!canvas.isHardwareAccelerated()) {
+                            return;
+                        }
 
                         // Never render a backdrop for BubbleTextView inside FolderIcon (desktop closed folder preview)
                         ViewParent parent = view.getParent();
@@ -1588,14 +1598,17 @@ public class XposedInit implements IXposedHookLoadPackage {
         if (!isAppIconDrag(dragView)) return;
         try {
             Rect iconBounds = getDragViewIconBounds(dragView);
+            int inset = Math.round(iconBounds.width() * 0.044f);
+            Rect blurBounds = new Rect(iconBounds);
+            blurBounds.inset(inset, inset);
+            float radius = blurBounds.width() / 2.0f;
 
             Object existing = XposedHelpers.getObjectField(dragView, "mFolderFrostedDrawable");
             if (existing instanceof Drawable) {
                 Drawable d = (Drawable) existing;
                 Rect bounds = d.getBounds();
-                if (!bounds.equals(iconBounds)) {
-                    d.setBounds(iconBounds);
-                    float radius = iconBounds.width() / 2.0f;
+                if (!bounds.equals(blurBounds)) {
+                    d.setBounds(blurBounds);
                     if (setClipRadiusMethod != null) {
                         setClipRadiusMethod.invoke(d, radius);
                     }
@@ -1622,8 +1635,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                 completeTransitionNowMethod.invoke(frostedDrawable);
             }
 
-            frostedDrawable.setBounds(iconBounds);
-            float radius = iconBounds.width() / 2.0f;
+            frostedDrawable.setBounds(blurBounds);
             if (setClipRadiusMethod != null) {
                 setClipRadiusMethod.invoke(frostedDrawable, radius);
             }
@@ -1646,10 +1658,6 @@ public class XposedInit implements IXposedHookLoadPackage {
                     }
                 }
             } catch (Throwable ignored) {}
-            try {
-                Object fg = XposedHelpers.getObjectField(dragView, "mFgSpringDrawable");
-                if (fg instanceof Drawable) sanitizeDragIconDrawable((Drawable) fg);
-            } catch (Throwable ignored) {}
 
             Log.i(TAG, "Attached live FrostedBackdropDrawable to DragView: " + iconBounds.width() + "x" + iconBounds.height() + " at " + iconBounds);
         } catch (Throwable t) {
@@ -1667,50 +1675,14 @@ public class XposedInit implements IXposedHookLoadPackage {
         }
 
         boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
-        int targetFg = isDark ? 0xFFF1F1F1 : 0xFF303030;
 
-        // Ensure FastBitmapDrawable's main paint does NOT tint the entire bitmap
-        try {
-            Paint p = (Paint) XposedHelpers.getObjectField(drawable, "paint");
-            if (p != null) {
-                p.setColorFilter(null);
-            }
-        } catch (Throwable ignored) {}
-
-        // Sanitize inner delegate
+        // Sanitize inner delegate only (neutralize artificial plates if any)
         try {
             Object delegate = XposedHelpers.getObjectField(drawable, "delegate");
             if (delegate != null) {
                 sanitizeDelegate(delegate, isDark);
             }
         } catch (Throwable ignored) {}
-
-        // Strip plate from bitmapInfo.icon
-        try {
-            Object info = XposedHelpers.getObjectField(drawable, "bitmapInfo");
-            if (info != null) {
-                Bitmap icon = (Bitmap) XposedHelpers.getObjectField(info, "icon");
-                if (icon != null && !icon.isRecycled()) {
-                    Bitmap cleaned = getCleanedBitmap(icon);
-                    if (cleaned != null && cleaned != icon) {
-                        XposedHelpers.setObjectField(info, "icon", cleaned);
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
-
-        // Strip plate from mBitmap directly
-        try {
-            Bitmap bmp = (Bitmap) XposedHelpers.getObjectField(drawable, "mBitmap");
-            if (bmp != null && !bmp.isRecycled()) {
-                Bitmap cleaned = getCleanedBitmap(bmp);
-                if (cleaned != null && cleaned != bmp) {
-                    XposedHelpers.setObjectField(drawable, "mBitmap", cleaned);
-                }
-            }
-        } catch (Throwable ignored) {}
-
-        drawable.invalidateSelf();
     }
 
     private static void drawAppIconFrostedLayer(View dragView, Canvas canvas) {
@@ -1722,12 +1694,17 @@ public class XposedInit implements IXposedHookLoadPackage {
             Drawable frostedDrawable = (Drawable) frostedObj;
 
             Rect iconBounds = getDragViewIconBounds(dragView);
-            float radius = iconBounds.width() / 2.0f;
+            int inset = Math.round(iconBounds.width() * 0.044f);
+            Rect blurBounds = new Rect(iconBounds);
+            blurBounds.inset(inset, inset);
+            float radius = blurBounds.width() / 2.0f;
 
+            if (setAnimateEntranceMethod != null) {
+                setAnimateEntranceMethod.invoke(frostedDrawable, false);
+            }
             if (setClipRadiusMethod != null) {
                 setClipRadiusMethod.invoke(frostedDrawable, radius);
             }
-            frostedDrawable.setBounds(iconBounds);
 
             int[] tempLoc = (int[]) XposedHelpers.getObjectField(dragView, "mTempLoc");
             if (tempLoc == null) {
@@ -1737,27 +1714,19 @@ public class XposedInit implements IXposedHookLoadPackage {
 
             float scaleX = dragView.getScaleX();
             float scaleY = dragView.getScaleY();
-            float screenX = tempLoc[0] + iconBounds.left * scaleX;
-            float screenY = tempLoc[1] + iconBounds.top * scaleY;
+            float screenX = tempLoc[0] + blurBounds.left * scaleX;
+            float screenY = tempLoc[1] + blurBounds.top * scaleY;
 
             updateOffsetMethod.invoke(frostedDrawable, screenX, screenY);
-
-            Path scaledMask = null;
-            try {
-                scaledMask = (Path) XposedHelpers.getObjectField(dragView, "mScaledMaskPath");
-            } catch (Throwable ignored) {}
-
-            int save = -1;
-            if (scaledMask != null) {
-                save = canvas.save();
-                canvas.clipPath(scaledMask);
+            if (completeTransitionNowMethod != null) {
+                completeTransitionNowMethod.invoke(frostedDrawable);
             }
 
+            canvas.save();
+            canvas.translate(blurBounds.left, blurBounds.top);
+            frostedDrawable.setBounds(0, 0, blurBounds.width(), blurBounds.height());
             frostedDrawable.draw(canvas);
-
-            if (save >= 0) {
-                canvas.restoreToCount(save);
-            }
+            canvas.restore();
 
             // Ensure mBgSpringDrawable stays 100% transparent
             XposedHelpers.setObjectField(dragView, "mBgSpringDrawable", new ColorDrawable(0));
@@ -2051,11 +2020,9 @@ public class XposedInit implements IXposedHookLoadPackage {
         }
 
         if (isDrag) {
-            // Strictly verify if this DragView is actually an app icon drag!
-            // If it is a widget or folder being dragged, NEVER clean or tint its drawable!
-            if (dragView != null && !isAppIconDrag(dragView)) {
-                return;
-            }
+            // DragView handles its own rendering and theme tinting cleanly.
+            // Never mutate paint color filter or run getCleanedBitmap during drag!
+            return;
         }
 
         boolean isHighlight = false;
@@ -2068,14 +2035,14 @@ public class XposedInit implements IXposedHookLoadPackage {
             }
         } catch (Throwable ignored) {}
 
-        // ONLY desktop, folder, actively dragged app icons, and popup highlight icons need plate removal and adaptive glyph tinting!
+        // ONLY desktop, folder, and popup highlight icons need plate removal and adaptive glyph tinting!
         // All apps drawer, search, and widgets MUST remain 100% untouched in their native state!
-        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER && !isDrag && !isHighlight) {
+        if (viewType != VIEW_TYPE_WORKSPACE && viewType != VIEW_TYPE_FOLDER && !isHighlight) {
             return;
         }
 
-        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView, FolderIcon, DragView, or popup highlight)
-        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon") && !isDrag && !isHighlight) {
+        // Additional safeguard: verify the view is actually an app icon view (BubbleTextView, FolderIcon, or popup highlight)
+        if (!viewClassName.contains("BubbleTextView") && !viewClassName.contains("FolderIcon") && !isHighlight) {
             return;
         }
 
@@ -2607,6 +2574,47 @@ public class XposedInit implements IXposedHookLoadPackage {
             }
         } catch (Throwable t) {
             Log.w(TAG, "populateAppIconCacheOnDemand failed: " + t.getMessage());
+        }
+    }
+
+    private void hookIconGen(XC_LoadPackage.LoadPackageParam lpparam) {
+        Log.i(TAG, "Initializing NothingBlurIcons hook in space.linuxct.nothing.icongen");
+
+        // 1. Hook IconArtwork.buildPlate to return a 100% transparent bitmap (eliminates baked plate)
+        try {
+            Class<?> iconArtworkClass = XposedHelpers.findClass("space.linuxct.nothing.icongen.IconArtwork", lpparam.classLoader);
+            XposedBridge.hookAllMethods(iconArtworkClass, "buildPlate", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    // Return pure transparent ARGB_8888 bitmap without any circular plate
+                    param.setResult(Bitmap.createBitmap(432, 432, Bitmap.Config.ARGB_8888));
+                }
+            });
+            Log.i(TAG, "Successfully hooked IconArtwork.buildPlate in IconGen!");
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to hook IconArtwork.buildPlate: " + t.getMessage(), t);
+        }
+
+        // 2. Hook ThemeColors$Palette to force background color = Color.TRANSPARENT (0)
+        try {
+            Class<?> paletteClass = XposedHelpers.findClass("space.linuxct.nothing.icongen.ThemeColors$Palette", lpparam.classLoader);
+            XposedBridge.hookAllConstructors(paletteClass, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args != null && param.args.length >= 2) {
+                        param.args[1] = 0; // force background = Color.TRANSPARENT
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(paletteClass, "getBackground", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult(0);
+                }
+            });
+            Log.i(TAG, "Successfully hooked ThemeColors$Palette in IconGen!");
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to hook ThemeColors$Palette: " + t.getMessage(), t);
         }
     }
 }
