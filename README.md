@@ -23,6 +23,12 @@ An **Xposed / LSPosed** module for Nothing OS that brings authentic, dynamic **f
 > 
 > Without `linuxct`'s brilliant work, this project would not exist!
 
+## 🔗 Recommended Companion: NothingBlurShortcuts
+
+> [!TIP]
+> Complete your Nothing OS frosted glass aesthetic with [**NothingBlurShortcuts**](https://github.com/Ak1o-T/NothingBlurShortcuts)!
+> While **NothingBlurIcons** brings real-time wallpaper blur to home screen & folder app icons, **NothingBlurShortcuts** applies the same authentic Nothing OS frosted glass blur to lockscreen shortcuts, lockscreen notifications (single, grouped, and shelf collage), and floating heads-up alerts. Together, they create a 100% unified Nothing OS visual experience.
+
 ## ✨ Features
 
 - 🪟 **Authentic Frosted Glass Blur:** Hooks directly into Nothing OS 5.0's proprietary `FrostedBackdropProvider` and `FrostedBackdropDrawable` — 100% identical in blur radius, lighting, and tint to official Nothing OS 5.0 widgets (Clock, Weather, Media Player).
@@ -101,6 +107,12 @@ This project is licensed under the Apache License, Version 2.0. See [LICENSE](LI
 > В то время как `nothing-icongen` формирует полупрозрачные основы для иконок Nothing OS, модуль **NothingBlurIcons** подключается напрямую к нативному системному движку `FrostedBackdropProvider` в Nothing Launcher и отрисовывает настоящее аппаратное размытие обоев под каждой иконкой.
 > 
 > Без задумки и работы `linuxct` создание этого модуля было бы невозможным!
+
+## 🔗 Рекомендуемое дополнение: NothingBlurShortcuts
+
+> [!TIP]
+> Создайте полноценный единый стиль матового стекла Nothing OS с помощью [**NothingBlurShortcuts**](https://github.com/Ak1o-T/NothingBlurShortcuts)!
+> В то время как **NothingBlurIcons** добавляет живое размытие обоев для иконок приложений на рабочем столе и в папках, **NothingBlurShortcuts** приносит аутентичный блюр на экран блокировки (кнопки быстрого доступа, уведомления и плашка-коллаж) и всплывающие уведомления. Вместе они идеально дополняют друг друга.
 
 ## ✨ Возможности и особенности
 
