@@ -78,7 +78,23 @@ public class XposedInit implements IXposedHookLoadPackage {
     private static final int VIEW_TYPE_WORKSPACE = 3;
     private static final int VIEW_TYPE_WIDGET = 4;
     private static final Map<View, Integer> viewTypeCache = new WeakHashMap<>();
-    private static final Set<View> themedViews = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final Map<View, Object> themedViewTags = new WeakHashMap<>();
+
+    private static class CachedIconBounds {
+        final Rect blurBounds;
+        final int viewW;
+        final int viewH;
+        final int paddingTop;
+        final int paddingLeft;
+
+        CachedIconBounds(Rect blurBounds, int viewW, int viewH, int paddingTop, int paddingLeft) {
+            this.blurBounds = blurBounds;
+            this.viewW = viewW;
+            this.viewH = viewH;
+            this.paddingTop = paddingTop;
+            this.paddingLeft = paddingLeft;
+        }
+    }
 
     private static class BackdropState {
         final Drawable drawable;
@@ -98,7 +114,7 @@ public class XposedInit implements IXposedHookLoadPackage {
     }
 
     private static final Map<View, BackdropState> backdropStates = new WeakHashMap<>();
-    private static final Map<View, Rect> iconBoundsCache = new WeakHashMap<>();
+    private static final Map<View, CachedIconBounds> iconBoundsCache = new WeakHashMap<>();
     private static final Map<Bitmap, Bitmap> rawBitmaps = new WeakHashMap<>();
     private static final Map<Bitmap, Bitmap> cleanedBitmapsDark = new WeakHashMap<>();
     private static final Map<Bitmap, Bitmap> cleanedBitmapsLight = new WeakHashMap<>();
@@ -711,11 +727,21 @@ public class XposedInit implements IXposedHookLoadPackage {
                             return;
                         }
 
-                        // Fast-path cached icon bounds (avoids reflection and object allocations on every frame)
-                        Rect blurBounds = iconBoundsCache.get(view);
+                        // Fast-path cached icon bounds validated against current view dimensions & padding
+                        // (prevents stale off-center plates when RecyclerView recycles or re-layouts BubbleTextView)
                         int viewW = view.getWidth();
                         int viewH = view.getHeight();
-                        if (blurBounds == null || viewW <= 0 || viewH <= 0) {
+                        if (viewW <= 0 || viewH <= 0) {
+                            return;
+                        }
+                        int padTop = view.getPaddingTop();
+                        int padLeft = view.getPaddingLeft();
+                        CachedIconBounds cachedBounds = iconBoundsCache.get(view);
+                        Rect blurBounds = (cachedBounds != null && cachedBounds.viewW == viewW && cachedBounds.viewH == viewH
+                                && cachedBounds.paddingTop == padTop && cachedBounds.paddingLeft == padLeft)
+                                ? cachedBounds.blurBounds : null;
+
+                        if (blurBounds == null) {
                             Rect iconBounds = new Rect();
                             try {
                                 XposedHelpers.callMethod(view, "getIconBounds", iconBounds);
@@ -732,7 +758,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                             if (iconBounds.isEmpty()) {
                                 if (iconSize > 0) {
                                     int left = (viewW - iconSize) / 2;
-                                    int top = view.getPaddingTop();
+                                    int top = padTop;
                                     iconBounds.set(left, top, left + iconSize, top + iconSize);
                                 } else {
                                     Drawable[] cds = view.getCompoundDrawables();
@@ -741,7 +767,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                                         if (b != null && !b.isEmpty()) {
                                             int bWidth = b.width();
                                             int left = (viewW - bWidth) / 2;
-                                            int top = view.getPaddingTop();
+                                            int top = padTop;
                                             iconBounds.set(left, top, left + bWidth, top + bWidth);
                                         }
                                     }
@@ -755,7 +781,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                             int inset = Math.round(iconBounds.width() * 0.044f);
                             blurBounds = new Rect(iconBounds);
                             blurBounds.inset(inset, inset);
-                            iconBoundsCache.put(view, blurBounds);
+                            iconBoundsCache.put(view, new CachedIconBounds(blurBounds, viewW, viewH, padTop, padLeft));
                         }
 
                         Context context = view.getContext();
@@ -1050,7 +1076,10 @@ public class XposedInit implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.thisObject instanceof View) {
-                        themedViews.remove((View) param.thisObject);
+                        View v = (View) param.thisObject;
+                        themedViewTags.remove(v);
+                        iconBoundsCache.remove(v);
+                        viewTypeCache.remove(v);
                     }
                     if (param.args != null && param.args.length > 0) {
                         ensureItemInfoHasThemedIcon(param.args[0]);
@@ -1068,7 +1097,10 @@ public class XposedInit implements IXposedHookLoadPackage {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.thisObject instanceof View) {
-                        themedViews.remove((View) param.thisObject);
+                        View v = (View) param.thisObject;
+                        themedViewTags.remove(v);
+                        iconBoundsCache.remove(v);
+                        viewTypeCache.remove(v);
                     }
                     if (param.args != null && param.args.length > 0) {
                         ensureItemInfoHasThemedIcon(param.args[0]);
@@ -1144,7 +1176,9 @@ public class XposedInit implements IXposedHookLoadPackage {
             return type;
         }
         int computed = computeViewType(view);
-        viewTypeCache.put(view, computed);
+        if (computed != VIEW_TYPE_UNKNOWN || view.getParent() != null) {
+            viewTypeCache.put(view, computed);
+        }
         return computed;
     }
 
@@ -1822,8 +1856,8 @@ public class XposedInit implements IXposedHookLoadPackage {
         synchronized (processedDrawables) {
             processedDrawables.clear();
         }
-        synchronized (themedViews) {
-            themedViews.clear();
+        synchronized (themedViewTags) {
+            themedViewTags.clear();
         }
         appIconsByComponent.clear();
         appIconsByPackage.clear();
@@ -2362,9 +2396,12 @@ public class XposedInit implements IXposedHookLoadPackage {
     }
 
     private static void ensureViewHasThemedIcon(TextView view) {
-        if (view == null || themedViews.contains(view)) return;
+        if (view == null) return;
         try {
             Object tag = view.getTag();
+            if (tag != null && themedViewTags.get(view) == tag) {
+                return;
+            }
             Bitmap themed = null;
             if (tag != null) {
                 ensureItemInfoHasThemedIcon(tag);
@@ -2418,7 +2455,9 @@ public class XposedInit implements IXposedHookLoadPackage {
                         }
                     } catch (Throwable ignored) {}
                 }
-                themedViews.add(view);
+                if (tag != null) {
+                    themedViewTags.put(view, tag);
+                }
             }
         } catch (Throwable ignored) {}
     }
