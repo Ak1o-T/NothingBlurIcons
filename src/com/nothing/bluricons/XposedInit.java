@@ -291,7 +291,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                             long now = SystemClock.uptimeMillis();
                             if (now - lastFolderScrollInvalidateUptime >= 8) {
                                 lastFolderScrollInvalidateUptime = now;
-                                invalidateIconsInLayout((ViewGroup) param.thisObject);
+                                invalidateIconsDrawOnly((ViewGroup) param.thisObject);
                             }
                         }
                     }
@@ -320,7 +320,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                         long now = SystemClock.uptimeMillis();
                         if (now - lastFolderScrollInvalidateUptime >= 8) {
                             lastFolderScrollInvalidateUptime = now;
-                            invalidateIconsInLayout((ViewGroup) param.thisObject);
+                            invalidateIconsDrawOnly((ViewGroup) param.thisObject);
                         }
                     }
                 }
@@ -456,7 +456,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                                 long now = SystemClock.uptimeMillis();
                                 if (now - lastFolderAnimInvalidateUptime >= 8) {
                                     lastFolderAnimInvalidateUptime = now;
-                                    invalidateIconsInLayout(folder);
+                                    invalidateIconsDrawOnly(folder);
                                 }
                             }
                         };
@@ -1363,6 +1363,30 @@ public class XposedInit implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * Lightweight 120 FPS invalidation path for active folder scroll/animation frames.
+     * Skips reflection and bitmap sanitization (handled on layout/animation end).
+     */
+    private static void invalidateIconsDrawOnly(ViewGroup vg) {
+        if (vg == null) return;
+        try {
+            int count = vg.getChildCount();
+            for (int i = 0; i < count; i++) {
+                View child = vg.getChildAt(i);
+                if (child == null) continue;
+                if (child instanceof TextView && child.getClass().getName().contains("BubbleTextView")) {
+                    Drawable[] cds = ((TextView) child).getCompoundDrawables();
+                    if (cds != null && cds.length > 1 && cds[1] != null) {
+                        cds[1].invalidateSelf();
+                    }
+                    child.invalidate();
+                } else if (child instanceof ViewGroup) {
+                    invalidateIconsDrawOnly((ViewGroup) child);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private static void invalidateIconsInLayout(ViewGroup vg) {
         if (vg == null) return;
         boolean isDark = (lastSeenUiMode == Configuration.UI_MODE_NIGHT_YES);
@@ -2004,19 +2028,68 @@ public class XposedInit implements IXposedHookLoadPackage {
                     }
                 }
                 swBitmap.setPixels(pixels, 0, w, 0, 0, w, h);
+                Bitmap scaled = scaleGlyphBitmap(swBitmap, pixels, w, h);
 
                 synchronized (cleanedBitmapsDark) {
-                    cleanedBitmapsDark.put(icon, swBitmap);
-                    cleanedBitmapsDark.put(swBitmap, swBitmap);
+                    cleanedBitmapsDark.put(icon, scaled);
+                    cleanedBitmapsDark.put(scaled, scaled);
                 }
-                return swBitmap;
+                return scaled;
             }
+
+            Bitmap scaled = scaleGlyphBitmap(swBitmap, pixels, w, h);
+            synchronized (cleanedBitmapsDark) {
+                cleanedBitmapsDark.put(icon, scaled);
+                cleanedBitmapsDark.put(scaled, scaled);
+            }
+            return scaled;
         } catch (Throwable ignored) {}
 
         synchronized (cleanedBitmapsDark) {
             cleanedBitmapsDark.put(icon, icon);
         }
         return icon;
+    }
+
+    /**
+     * Enlarges the inner glyph slightly (+20%, capped at 60% of canvas width)
+     * so themed icons look balanced and bold inside the 184px frosted circle.
+     */
+    private static Bitmap scaleGlyphBitmap(Bitmap src, int[] pixels, int w, int h) {
+        if (src == null || src.isRecycled() || w <= 0 || h <= 0) return src;
+        try {
+            int minX = w, minY = h, maxX = -1, maxY = -1;
+            for (int y = 0; y < h; y++) {
+                int row = y * w;
+                for (int x = 0; x < w; x++) {
+                    int a = (pixels[row + x] >>> 24);
+                    if (a > 16) {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+            if (maxX < minX || maxY < minY) return src;
+
+            int maxDim = Math.max(maxX - minX + 1, maxY - minY + 1);
+            float maxAllowed = w * 0.60f;
+            if (maxDim >= maxAllowed) return src;
+
+            float scale = Math.min(1.20f, maxAllowed / (float) maxDim);
+            if (scale <= 1.02f) return src;
+
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            Matrix m = new Matrix();
+            m.postScale(scale, scale, w / 2.0f, h / 2.0f);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+            c.drawBitmap(src, m, p);
+            return out;
+        } catch (Throwable ignored) {
+            return src;
+        }
     }
 
     private static void cleanDrawableIcon(Object drawable) {
